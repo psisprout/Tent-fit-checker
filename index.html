@@ -1,0 +1,165 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>정확한 텐트 배치 (팔각형)</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      max-width: 600px;
+      margin: auto;
+    }
+    input {
+      width: 100%;
+      padding: 10px;
+      margin: 10px 0;
+      font-size: 1.1em;
+    }
+    canvas {
+      border: 1px solid #ccc;
+      margin-top: 20px;
+      width: 100%;
+      height: auto;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <h2>발할 텐트 배치</h2>
+  <label>땅 가로 (cm)</label>
+  <input type="number" id="groundWidth" value="800">
+  <label>땅 세로 (cm)</label>
+  <input type="number" id="groundHeight" value="600">
+  <button onclick="drawCanvas()">땅 다시 그리기</button>
+  <canvas id="canvas" width="600" height="400"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let tent = { x: 300, y: 200, angle: 0, dragging: false };
+    let scale = 1;
+
+    const TENT_WIDTH = 780;
+    const TENT_HEIGHT = 300;
+
+    function getOctagonPoints(w, h) {
+      const x = w / 2, y = h / 2;
+      return [
+        [-x * 0.795, -y],
+        [ x * 0.795, -y],
+        [ x, -y * 0.667],
+        [ x,  y * 0.667],
+        [ x * 0.795,  y],
+        [-x * 0.795,  y],
+        [-x,  y * 0.667],
+        [-x, -y * 0.667]
+      ];
+    }
+
+    function rotatePoints(points, angle) {
+      const rad = angle * Math.PI / 180;
+      const cos = Math.cos(rad), sin = Math.sin(rad);
+      return points.map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
+    }
+
+    function drawCanvas() {
+      const gw = parseFloat(document.getElementById('groundWidth').value);
+      const gh = parseFloat(document.getElementById('groundHeight').value);
+      scale = Math.min(canvas.width / gw, canvas.height / gh);
+      const gW = gw * scale;
+      const gH = gh * scale;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#e0f7fa';
+      ctx.fillRect(0, 0, gW, gH);
+
+      ctx.save();
+      ctx.translate(tent.x, tent.y);
+      ctx.rotate(tent.angle * Math.PI / 180);
+      const points = rotatePoints(getOctagonPoints(TENT_WIDTH * scale, TENT_HEIGHT * scale), 0);
+      ctx.beginPath();
+      ctx.moveTo(points[0][0], points[0][1]);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i][0], points[i][1]);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#ff8a65';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    canvas.addEventListener('mousedown', e => {
+      const rect = canvas.getBoundingClientRect();
+      tent.dragging = true;
+      tent.offsetX = e.clientX - rect.left - tent.x;
+      tent.offsetY = e.clientY - rect.top - tent.y;
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      if (tent.dragging) {
+        const rect = canvas.getBoundingClientRect();
+        tent.x = e.clientX - rect.left - tent.offsetX;
+        tent.y = e.clientY - rect.top - tent.offsetY;
+        drawCanvas();
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      tent.dragging = false;
+    });
+
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      tent.angle += e.deltaY > 0 ? 5 : -5;
+      drawCanvas();
+    });
+
+    let lastTouch = null;
+    canvas.addEventListener('touchstart', e => {
+      if (e.touches.length === 1) {
+        const rect = canvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        tent.dragging = true;
+        tent.offsetX = touch.clientX - rect.left - tent.x;
+        tent.offsetY = touch.clientY - rect.top - tent.y;
+      } else if (e.touches.length === 2) {
+        lastTouch = getAngle(e.touches);
+      }
+    });
+
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      if (e.touches.length === 1 && tent.dragging) {
+        const touch = e.touches[0];
+        tent.x = touch.clientX - rect.left - tent.offsetX;
+        tent.y = touch.clientY - rect.top - tent.offsetY;
+        drawCanvas();
+      } else if (e.touches.length === 2) {
+        const newAngle = getAngle(e.touches);
+        if (lastTouch != null) {
+          tent.angle += newAngle - lastTouch;
+          drawCanvas();
+        }
+        lastTouch = newAngle;
+      }
+    });
+
+    canvas.addEventListener('touchend', () => {
+      tent.dragging = false;
+      lastTouch = null;
+    });
+
+    function getAngle(touches) {
+      const dx = touches[1].clientX - touches[0].clientX;
+      const dy = touches[1].clientY - touches[0].clientY;
+      return Math.atan2(dy, dx) * 180 / Math.PI;
+    }
+
+    drawCanvas();
+  </script>
+</body>
+</html>
