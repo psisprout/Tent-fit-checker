@@ -16,6 +16,23 @@ def _quote(path):
     return "'%s'" % path
 
 
+def short_path(path, parts=2):
+    """Last few path components - enough to tell two same-named files apart."""
+    bits = os.path.normpath(path).split(os.sep)
+    return os.sep.join(bits[-parts:]) if len(bits) > parts else path
+
+
+def _stat_line(path):
+    """path, size and mtime, so a result can be traced back to a DB version."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return "%s  (cannot stat)" % path
+    when = datetime.datetime.fromtimestamp(st.st_mtime).strftime(
+        "%Y-%m-%d %H:%M")
+    return "%s  (%d bytes, modified %s)" % (path, st.st_size, when)
+
+
 def render_deck(cfg, nl, config_path=None):
     width = cfg["deck"]["width"]
     out = []
@@ -41,6 +58,15 @@ def render_deck(cfg, nl, config_path=None):
     if cfg["deck"]["globals"]:
         out.append(".global %s" % " ".join(str(g) for g in cfg["deck"]["globals"]))
 
+    used = []
+    for _inst, sub, _b in nl.instances:
+        if sub.path not in used:
+            used.append(sub.path)
+    if used:
+        out.extend(_section("models this deck was built from"))
+        for path in used:
+            out.append("* %s" % _stat_line(path))
+
     if cfg["models"]["emit_includes"] and cfg["models"]["files"]:
         out.extend(_section("model / library includes"))
         for entry in cfg["models"]["files"]:
@@ -65,7 +91,7 @@ def render_deck(cfg, nl, config_path=None):
     out.extend(_section("instances"))
     for inst, sub, bindings in nl.instances:
         out.append("* %s : %s  (%s)" % (inst["name"], sub.name,
-                                        os.path.basename(sub.path)))
+                                        short_path(sub.path)))
         if inst.get("comment"):
             out.append("* %s" % inst["comment"])
         toks = [inst["name"]]
@@ -150,7 +176,7 @@ def render_report(cfg, nl, subckt_files):
         out.append("-" * 60)
         out.append("%s  (subckt %s, %d ports)  [%s]"
                    % (inst["name"], sub.name, len(bindings),
-                      os.path.basename(sub.path)))
+                      short_path(sub.path)))
         widest = max([len(b.port) for b in bindings] + [4])
         for b in bindings:
             total += 1

@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 89개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 95개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -201,6 +201,41 @@ net 이름은 SPICE 규칙대로 대소문자를 구분하지 않습니다 (`PAD
 `termination.keep_nets` 에 정규식을 넣으면 그 net은 뜬 노드 검사에서 제외됩니다
 (외부에서 자극을 주는 net 등).
 
+## 4-1. 폴더에 DB 버전이 섞여 있을 때
+
+스테이지 폴더에 `pkg_v1p0.inc`, `pkg_v2p3_20260801.inc` 처럼 여러 버전이 같이 있으면
+같은 `.subckt` 이름이 여러 번 정의됩니다. **이때 어느 걸 쓸지는 이 도구가 정하지 않습니다.**
+그건 엔지니어링 판단이지 파일 이름으로 추측할 일이 아닙니다.
+
+```
+error: instance XPKG: subckt 'pkg_sp' is defined in 2 files, so which one to use
+is a decision this tool will not make for you. Set 'source' on the instance to one of:
+  /proj/models/2_soc_pkg/pkg_v1p0.inc
+  /proj/models/2_soc_pkg/pkg_v2p3_20260801.inc
+```
+
+`source` 로 지정합니다. 경로의 일부만 써도 되지만 **후보를 하나로 좁히지 못하면 그것도 에러**입니다:
+
+```jsonc
+{ "name": "XPKG", "subckt": "pkg_sp", "source": "pkg_v2p3_20260801.inc" }
+```
+
+- 실제로 인스턴스가 부르는 이름만 따집니다. 안 쓰는 중복은 아무 말 안 합니다.
+- 옛날 방식(경고 후 첫 번째 사용)이 필요하면 `models.on_duplicate: "warn"`.
+
+그리고 **생성된 덱 헤더에 실제로 쓴 모델 파일이 크기·수정시각과 함께 박힙니다.**
+몇 달 뒤 "이 아이 다이어그램 어느 패키지 DB로 뽑은 거지?"에 답할 수 있어야 해서입니다.
+
+```
+*----------------------------------------------------------------------------
+* models this deck was built from
+*----------------------------------------------------------------------------
+* /proj/models/2_soc_pkg/pkg_v2p3_20260801.inc  (184320 bytes, modified 2026-08-01 09:12)
+```
+
+버전이 섞인 폴더라면 글롭보다 **파일을 명시하는 쪽**을 권합니다. 어차피 스테이지당 한 줄이고,
+config를 보면 이번 시뮬이 어떤 DB 조합인지 한눈에 보입니다.
+
 ## 5. 여러 제품 덱 공유 — `extends`
 
 사내 공통 룰(테스트핀 처리, 전원 이름 규칙 등)은 베이스 config 하나에 몰아두고,
@@ -239,6 +274,7 @@ net 이름은 SPICE 규칙대로 대소문자를 구분하지 않습니다 (`PAD
     // models/0_soc_io, 1_soc_rdl ... 처럼 번호를 붙여두면 stage 순서대로 나옴
     "files": ["models/**/*.inc", "models/3_board", {"path": "b.lib", "section": "tt"}],
     "extensions": [".inc", ".sp", ".spi", ".lib", ".cir", ".mod", ".net"],
+    "on_duplicate": "error",            // 같은 subckt이 여러 파일에 있을 때
     "search_dirs": ["/proj/models"],    // include 따라갈 때 탐색 경로
     "follow_includes": false,           // .include/.lib 를 재귀적으로 따라감
     "expand_buses": false,              // .subckt 의 DQ[7:0] 을 비트로 펼침

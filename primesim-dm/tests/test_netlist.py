@@ -170,6 +170,61 @@ class TestResolution(unittest.TestCase):
                           {"naming": {"default": "error"}})
 
 
+class TestVersionedModels(unittest.TestCase):
+    """Stage folders hold several DB versions of the same subckt."""
+
+    SRC = ".subckt pkg_sp a b\nR1 a b 0.2\n.ends\n"
+
+    def build_two(self, inst_extra=None, on_dup="error"):
+        raw = {"models": {"on_duplicate": on_dup},
+               "naming": {"default": "same_name"},
+               "instances": [dict({"name": "XPKG", "subckt": "pkg_sp"},
+                                  **(inst_extra or {}))]}
+        cfg = config.normalize(raw)
+        subs = (spice.parse_subckts(self.SRC, "/m/2_pkg/pkg_v1p0.inc")
+                + spice.parse_subckts(self.SRC, "/m/2_pkg/pkg_v2p3.inc"))
+        return netlist.Resolver(cfg, netlist.build_index(subs)).build()
+
+    def test_ambiguous_version_is_an_error(self):
+        try:
+            self.build_two()
+        except netlist.NetlistError as exc:
+            self.assertIn("pkg_v1p0.inc", str(exc))
+            self.assertIn("pkg_v2p3.inc", str(exc))
+            self.assertIn("source", str(exc))
+        else:
+            self.fail("picking a DB version must not happen silently")
+
+    def test_source_pins_the_version(self):
+        nl = self.build_two({"source": "pkg_v2p3.inc"})
+        self.assertEqual(nl.instances[0][1].path, "/m/2_pkg/pkg_v2p3.inc")
+
+    def test_source_that_still_matches_both_is_an_error(self):
+        self.assertRaises(netlist.NetlistError, self.build_two,
+                          {"source": "2_pkg"})
+
+    def test_source_matching_nothing_is_an_error(self):
+        self.assertRaises(netlist.NetlistError, self.build_two,
+                          {"source": "pkg_v9.inc"})
+
+    def test_warn_policy_keeps_the_old_behaviour(self):
+        nl = self.build_two(on_dup="warn")
+        self.assertTrue(any("defined in 2 files" in w for w in nl.warnings))
+        self.assertEqual(nl.instances[0][1].path, "/m/2_pkg/pkg_v1p0.inc")
+
+    def test_unused_duplicate_does_not_complain(self):
+        # only an instance that actually references the name has a problem
+        raw = {"naming": {"default": "same_name"},
+               "instances": [{"name": "XA", "subckt": "other"}]}
+        cfg = config.normalize(raw)
+        subs = (spice.parse_subckts(self.SRC, "/m/a.inc")
+                + spice.parse_subckts(self.SRC, "/m/b.inc")
+                + spice.parse_subckts(".subckt other a b\nR1 a b 1k\n.ends\n",
+                                      "/m/c.inc"))
+        nl = netlist.Resolver(cfg, netlist.build_index(subs)).build()
+        self.assertEqual([w for w in nl.warnings if "pkg_sp" in w], [])
+
+
 class TestTermination(unittest.TestCase):
     def test_tie_uses_the_rail_directly(self):
         _cfg, nl = build({"naming": {"rules": [

@@ -198,15 +198,30 @@ class Resolver(object):
         if len(cands) > 1:
             want = inst.get("source")
             if want:
-                for c in cands:
-                    if c.path.endswith(want) or want in c.path:
-                        return c
+                hits = [c for c in cands
+                        if c.path.endswith(want) or want in c.path]
+                if len(hits) == 1:
+                    return hits[0]
+                if not hits:
+                    raise NetlistError(
+                        "instance %s: subckt %r is defined in %d files, none "
+                        "matching source %r:\n  %s"
+                        % (inst["name"], name, len(cands), want,
+                           "\n  ".join(c.path for c in cands)))
                 raise NetlistError(
-                    "instance %s: subckt %r found in %d files, none matching "
-                    "source %r" % (inst["name"], name, len(cands), want))
-            self.warn("subckt %r defined in %d files; using %s (set 'source' "
-                      "on instance %s to pin it down)"
-                      % (name, len(cands), cands[0].path, inst["name"]))
+                    "instance %s: source %r still matches %d files - make it "
+                    "more specific:\n  %s"
+                    % (inst["name"], want, len(hits),
+                       "\n  ".join(c.path for c in hits)))
+            policy = self.cfg["models"]["on_duplicate"]
+            msg = ("instance %s: subckt %r is defined in %d files, so which "
+                   "one to use is a decision this tool will not make for you."
+                   " Set 'source' on the instance to one of:\n  %s"
+                   % (inst["name"], name, len(cands),
+                      "\n  ".join(c.path for c in cands)))
+            if policy == "error":
+                raise NetlistError(msg)
+            self.warn(msg + "\n  -> using the first")
         return cands[0]
 
     # -- termination -----------------------------------------------------

@@ -81,6 +81,7 @@ DEFAULTS = {
         "follow_includes": False,
         "expand_buses": False,
         "emit_includes": True,
+        "on_duplicate": "error",   # error | warn - same subckt in two files
     },
     "naming": {
         "case": "keep",          # keep | upper | lower
@@ -177,6 +178,8 @@ def _check_aliases(cfg):
 
 def validate(cfg):
     _check_aliases(cfg)
+    if cfg["models"]["on_duplicate"] not in ("error", "warn"):
+        raise ConfigError("models.on_duplicate must be 'error' or 'warn'")
     if cfg["naming"]["default"] not in _DEFAULT_POLICIES:
         raise ConfigError("naming.default must be one of %s"
                           % "/".join(_DEFAULT_POLICIES))
