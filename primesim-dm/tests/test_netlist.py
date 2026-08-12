@@ -50,6 +50,66 @@ class TestTemplate(unittest.TestCase):
                           netlist.expand_template, "{nope}", None, {})
 
 
+CHANNEL = """\
+*node 1  SCA0_A_BGA1_G4_T1
+*node 2  SCA0_A_DIE1_46_T1
+*node 3  SCA0_A_DIE2_46_T1
+*node 4  SA1_A_BGA1_G5_T1
+.subckt ch_sp 1 2 3 4
+R1 1 2 0.1
+.ends
+"""
+
+ALIAS_SIG = {"sig": {"on_miss": "error", "rules": [
+    {"match": "^S?CA(\\d+)$", "to": "ca{1}"},
+    {"match": "^SA(\\d+)$", "to": "ca{1}"}]}}
+
+CHANNEL_RULES = [
+    {"match": "^(\\w+?)_\\w+_BGA\\d*_.*", "net": "rcv_ball_{1|alias:sig}"},
+    {"match": "^(\\w+?)_\\w+_DIE(\\d+)_.*", "net": "rcv{2}_bump_{1|alias:sig}"},
+]
+
+
+class TestChannelAlias(unittest.TestCase):
+    """S-parameter channel: names come from *node, signal names vary."""
+
+    def build_ch(self, aliases=ALIAS_SIG):
+        return build({"aliases": aliases,
+                      "naming": {"case": "lower", "default": "error",
+                                 "rules": CHANNEL_RULES},
+                      "instances": [{"name": "XCH", "subckt": "ch_sp"}]},
+                     model=CHANNEL, expand=False)
+
+    def test_alias_and_die_index(self):
+        _cfg, nl = self.build_ch()
+        got = nets_of(nl, "XCH")
+        self.assertEqual(got["SCA0_A_BGA1_G4_T1"], "rcv_ball_ca0")
+        self.assertEqual(got["SCA0_A_DIE1_46_T1"], "rcv1_bump_ca0")
+        self.assertEqual(got["SCA0_A_DIE2_46_T1"], "rcv2_bump_ca0")
+        self.assertEqual(got["SA1_A_BGA1_G5_T1"], "rcv_ball_ca1")
+
+    def test_unknown_signal_name_is_an_error(self):
+        aliases = {"sig": {"on_miss": "error",
+                           "rules": [{"match": "^ZZ(\\d+)$", "to": "zz{1}"}]}}
+        try:
+            self.build_ch(aliases)
+        except netlist.NetlistError as exc:
+            self.assertIn("SCA0", str(exc))
+            self.assertIn("sig", str(exc))
+        else:
+            self.fail("an unmapped signal name should not pass silently")
+
+    def test_on_miss_keep_passes_the_name_through(self):
+        aliases = {"sig": {"on_miss": "keep",
+                           "rules": [{"match": "^ZZ(\\d+)$", "to": "zz{1}"}]}}
+        _cfg, nl = self.build_ch(aliases)
+        self.assertEqual(nets_of(nl, "XCH")["SCA0_A_BGA1_G4_T1"],
+                         "rcv_ball_sca0")
+
+    def test_undefined_alias_table(self):
+        self.assertRaises(netlist.NetlistError, self.build_ch, {})
+
+
 class TestResolution(unittest.TestCase):
     def test_default_same_name(self):
         _cfg, nl = build({})

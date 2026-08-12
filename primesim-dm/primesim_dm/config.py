@@ -95,6 +95,7 @@ DEFAULTS = {
         "overrides": [],
         "net_prefix": "n_",
     },
+    "aliases": {},
     "supplies": [],
     "instances": [],
     "stimulus": [],
@@ -148,7 +149,32 @@ def _check_term(term, where):
                           % (where, t, ", ".join(_VALID_TERM_TYPES)))
 
 
+def _check_aliases(cfg):
+    tables = cfg["aliases"]
+    if not isinstance(tables, dict):
+        raise ConfigError("'aliases' must be an object of named tables")
+    for name, spec in tables.items():
+        where = "aliases.%s" % name
+        if not isinstance(spec, dict):
+            raise ConfigError("%s: must be an object with 'rules'" % where)
+        if spec.get("on_miss", "error") not in ("error", "keep"):
+            raise ConfigError("%s.on_miss must be 'error' or 'keep'" % where)
+        rules = spec.get("rules")
+        if not isinstance(rules, list) or not rules:
+            raise ConfigError("%s: needs a non-empty 'rules' list" % where)
+        for i, r in enumerate(rules):
+            at = "%s.rules[%d]" % (where, i)
+            if not isinstance(r, dict) or "match" not in r or "to" not in r:
+                raise ConfigError("%s: needs 'match' and 'to'" % at)
+            try:
+                re.compile(r["match"])
+            except re.error as exc:
+                raise ConfigError("%s: bad regex %r (%s)"
+                                  % (at, r["match"], exc))
+
+
 def validate(cfg):
+    _check_aliases(cfg)
     if cfg["naming"]["default"] not in _DEFAULT_POLICIES:
         raise ConfigError("naming.default must be one of %s"
                           % "/".join(_DEFAULT_POLICIES))

@@ -23,7 +23,10 @@ class NetlistError(Exception):
     pass
 
 
-def _apply_transform(value, name):
+def _apply_transform(value, name, aliases=None):
+    if name.startswith("alias:"):
+        table = name.split(":", 1)[1]
+        return apply_alias(value, table, aliases)
     if name == "upper":
         return value.upper()
     if name == "lower":
@@ -37,7 +40,30 @@ def _apply_transform(value, name):
     raise NetlistError("unknown template transform %r" % name)
 
 
-def expand_template(tmpl, match, ctx):
+def apply_alias(value, table, aliases):
+    """Map a project-specific signal token onto the canonical name.
+
+    The same JEDEC signal shows up as ``CA0`` in one model, ``SCA0`` or
+    ``SA0`` in the next, so the mapping cannot be a regex in the wiring rule -
+    it has to be a table someone maintains per project.
+    """
+    aliases = aliases or {}
+    if table not in aliases:
+        raise NetlistError("template uses alias table %r, which is not "
+                           "defined under 'aliases'" % table)
+    spec = aliases[table]
+    for rx, to in spec["rules"]:
+        m = rx.match(value)
+        if m:
+            return expand_template(to, m, {"in": value})
+    if spec["on_miss"] == "keep":
+        return value
+    raise NetlistError(
+        "signal %r matches no rule in alias table %r - add it, or set "
+        "aliases.%s.on_miss to \"keep\"" % (value, table, table))
+
+
+def expand_template(tmpl, match, ctx, aliases=None):
     """Expand ``{1}``/``{name}`` fields, with optional ``|transform`` chains."""
 
     def sub(mo):
@@ -60,7 +86,7 @@ def expand_template(tmpl, match, ctx):
                                % (tmpl, key))
         value = "" if value is None else str(value)
         for t in parts[1:]:
-            value = _apply_transform(value, t.strip())
+            value = _apply_transform(value, t.strip(), aliases)
         return value
 
     tmpl = tmpl.replace("{{", "\x00").replace("}}", "\x01")
@@ -117,9 +143,21 @@ class Resolver(object):
         self._term_overrides = self._compile(self.term_cfg["overrides"],
                                              "termination.overrides")
         self._keep = [re.compile(p) for p in self.term_cfg["keep_nets"]]
+        self.aliases = self._compile_aliases(cfg["aliases"])
         self._counter = 0
 
     # -- helpers ---------------------------------------------------------
+    @staticmethod
+    def _compile_aliases(tables):
+        out = {}
+        for name, spec in (tables or {}).items():
+            out[name] = {
+                "on_miss": spec.get("on_miss", "error"),
+                "rules": [(re.compile(r["match"]), r["to"])
+                          for r in spec.get("rules", [])],
+            }
+        return out
+
     def _compile(self, rules, where):
         out = []
         for i, r in enumerate(rules or []):
@@ -299,10 +337,12 @@ class Resolver(object):
                     b.detail = "%s (terminate) %s" % (where, rule["match"])
                     if rule.get("net"):
                         b.net = self._normalize_net(
-                            expand_template(rule["net"], m, ctx))
+                            expand_template(rule["net"], m, ctx,
+                                            self.aliases))
                     self._terminate(b, self._term_spec(inst, port, rule), netlist)
                     return b
-                b.net = self._normalize_net(expand_template(rule["net"], m, ctx))
+                b.net = self._normalize_net(
+                    expand_template(rule["net"], m, ctx, self.aliases))
                 b.origin = kind
                 b.detail = "%s %s" % (where, rule["match"])
                 return b
