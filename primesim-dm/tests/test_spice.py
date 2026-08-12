@@ -28,6 +28,38 @@ class TestLines(unittest.TestCase):
         self.assertEqual(rebuilt, toks)
 
 
+class TestIncludePath(unittest.TestCase):
+    """A relative path starts with a dot, so 'starts with .' cannot be the
+    test for whether a .lib line names a file."""
+
+    def test_relative_include(self):
+        self.assertEqual(spice.include_path(".include '../models/a.inc'"),
+                         "../models/a.inc")
+        self.assertEqual(spice.include_path(".include ./b.inc"), "./b.inc")
+        self.assertEqual(spice.include_path(".inc '../../c.inc'"), "../../c.inc")
+
+    def test_absolute_and_plain(self):
+        self.assertEqual(spice.include_path(".include '/proj/m.inc'"),
+                         "/proj/m.inc")
+        self.assertEqual(spice.include_path(".include m.inc"), "m.inc")
+
+    def test_lib_with_section_names_a_file(self):
+        self.assertEqual(spice.include_path(".lib '../c.lib' tt"), "../c.lib")
+        self.assertEqual(spice.include_path(".lib ../c.lib tt"), "../c.lib")
+
+    def test_bare_lib_section_call_is_not_a_file(self):
+        self.assertIsNone(spice.include_path(".lib tt"))
+        self.assertIsNone(spice.include_path(".lib ff_hot"))
+
+    def test_quoted_lib_without_section_is_a_file(self):
+        self.assertEqual(spice.include_path(".lib '../corners.lib'"),
+                         "../corners.lib")
+
+    def test_other_lines(self):
+        self.assertIsNone(spice.include_path("R1 a b 1k"))
+        self.assertIsNone(spice.include_path(".temp 25"))
+
+
 class TestSubckt(unittest.TestCase):
     SRC = """\
 * header

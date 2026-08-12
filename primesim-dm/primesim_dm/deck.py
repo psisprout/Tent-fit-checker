@@ -187,10 +187,9 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
                 depth = max(0, depth - 1)
                 continue
 
-            m = _DOT_INCLUDE.match(line) or _DOT_LIB.match(line)
-            if m:
-                raw = m.group(1) or m.group(2) or m.group(3)
-                if raw and not raw.startswith("."):
+            if _DOT_INCLUDE.match(line) or _DOT_LIB.match(line):
+                raw = spice.include_path(line)
+                if raw:
                     target = _resolve(raw, base_dir, search_dirs)
                     if target is None:
                         deck.missing_includes.append(

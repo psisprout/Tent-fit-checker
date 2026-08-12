@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 95개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 105개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -63,9 +63,15 @@ python3 -m primesim_dm check my_deck.jsonc
 손으로 만든 덱, 남이 준 덱, 예전 프로젝트 덱에 그대로 돌아갑니다.
 
 ```bash
+# 어느 디렉토리에서든 (런처 사용)
+/proj/tools/primesim-dm/primesim-dm lint /proj/sim/lpddr_write.sp
+
+# 패키지 폴더 안에서라면
 python3 -m primesim_dm lint /proj/sim/lpddr_write.sp
-python3 -m primesim_dm lint deck.sp --search-dir /proj/models -v
 ```
+
+`.include` 상대경로는 **그 파일 위치 기준**으로 풀립니다. 환경변수(`$MODELS/...`)도 전개됩니다.
+그래도 못 찾는 경로가 있으면 `--search-dir` 를 추가하세요 (여러 번 가능).
 
 ```
 primesim-dm-setup deck check

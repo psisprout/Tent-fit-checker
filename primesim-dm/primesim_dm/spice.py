@@ -312,6 +312,31 @@ def parse_subckts(text, path="<string>", expand_buses=False):
     return found
 
 
+def include_path(line):
+    """The file a ``.include``/``.lib`` line points at, or None.
+
+    ``.lib 'file' section`` names a file, but a bare ``.lib tt`` inside a
+    library selects a section and names no file.  Telling those apart cannot
+    be done by looking for a leading dot - every relative path starts with
+    one.
+    """
+    m = _INCLUDE.match(line)
+    if m:
+        return m.group(1) or m.group(2) or m.group(3) or None
+    m = _LIB.match(line)
+    if not m:
+        return None
+    raw = m.group(1) or m.group(2) or m.group(3)
+    if not raw:
+        return None
+    quoted = bool(m.group(1) or m.group(2))
+    if quoted or m.group(4):            # quoted, or followed by a section name
+        return raw
+    if "/" in raw or os.sep in raw or os.path.splitext(raw)[1]:
+        return raw
+    return None                          # bare section call
+
+
 def _resolve_path(raw, base_dir, search_dirs):
     raw = os.path.expandvars(os.path.expanduser(raw))
     cands = [raw] if os.path.isabs(raw) else []
@@ -358,11 +383,8 @@ def scan_files(paths, follow_includes=False, search_dirs=(),
             continue
         base_dir = os.path.dirname(p)
         for _lineno, line in logical_lines(text):
-            m = _INCLUDE.match(line) or _LIB.match(line)
-            if not m:
-                continue
-            raw = m.group(1) or m.group(2) or m.group(3)
-            if not raw or raw.startswith("."):
+            raw = include_path(line)
+            if not raw:
                 continue
             resolved = _resolve_path(raw, base_dir, search_dirs)
             if resolved:

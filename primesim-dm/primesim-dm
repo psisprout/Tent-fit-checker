@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Run primesim-dm from anywhere: /path/to/primesim-dm/primesim-dm lint deck.sp
+
+Keeping the package importable without installing it matters more than it
+looks - in a locked-down EDA environment there is often no pip, no virtualenv
+and no write access to site-packages.
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from primesim_dm.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -88,6 +88,41 @@ class TestNodeSplitting(Harness):
         self.assertEqual([e.name for e in dk.elements], ["R2"])
 
 
+class TestIncludeFollowing(Harness):
+    def test_relative_include_is_followed(self):
+        os.makedirs(os.path.join(self.dir, "models"))
+        with open(os.path.join(self.dir, "models", "m.inc"), "w") as fh:
+            fh.write(".subckt io a b c\nR1 a b 1k\n.ends\n")
+        os.makedirs(os.path.join(self.dir, "sim"))
+        p = os.path.join(self.dir, "sim", "d.sp")
+        with open(p, "w") as fh:
+            fh.write(".include '../models/m.inc'\nX1 x y z io\nR9 x y 1k\n")
+        dk = deck.read([p])
+        self.assertEqual(len(dk.files), 2)
+        self.assertIn("io", dk.subckts)
+        self.assertEqual(dk.missing_includes, [])
+        codes = [f.code for f in check.Checker(dk).run()]
+        self.assertNotIn("undefined-subckt", codes)
+        self.assertNotIn("port-count", codes)
+
+    def test_missing_relative_include_is_reported(self):
+        _dk, _c, f = self.lint(".include '../nope/m.inc'\nR1 a b 1k\n"
+                               "R2 a b 1k\n")
+        self.assertIn("missing-include", [x.code for x in f])
+
+    def test_bare_lib_section_is_not_a_missing_file(self):
+        _dk, _c, f = self.lint(".lib tt\nR1 a b 1k\nR2 a b 1k\n")
+        self.assertEqual([x for x in f if x.code == "missing-include"], [])
+
+    def test_no_includes_flag(self):
+        with open(os.path.join(self.dir, "m.inc"), "w") as fh:
+            fh.write(".subckt io a b\n.ends\n")
+        p = self.write("d.sp", ".include 'm.inc'\nR1 a b 1k\nR2 a b 1k\n")
+        dk = deck.read([p], follow_includes=False)
+        self.assertEqual(len(dk.files), 1)
+        self.assertEqual(dk.missing_includes, [])
+
+
 class TestChecks(Harness):
     SUB = ".subckt io_cell VDD VSS PAD DIN\nR1 PAD DIN 1k\n.ends\n"
 
