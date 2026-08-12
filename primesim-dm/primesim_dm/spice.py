@@ -117,6 +117,11 @@ def _tokenize(text):
             out[-1] = out[-1] + "=" + nxt
             i += 2
             continue
+        if t.startswith("=") and out:
+            # "type =slow" - space only on the left of the '='
+            out[-1] = out[-1] + t
+            i += 1
+            continue
         if t.endswith("=") and i + 1 < len(toks):
             out.append(t + toks[i + 1])
             i += 2

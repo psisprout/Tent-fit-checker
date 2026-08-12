@@ -56,6 +56,31 @@ XI A B amp
         self.assertEqual(subs[0].ports, ["a", "b"])
         self.assertEqual(subs[0].params, {"w": "1u"})
 
+    def test_ibis_wrapper(self):
+        # IBIS buffers arrive wrapped in a subckt: ports on the continuation
+        # line, and the b-element carries params spaced every which way
+        src = """.subckt DQ_IBIS
++ nd_in nd_out nd_pu nd_pd
+b nd_pu nd_pd nd_out nd_in nd_en nd_out_of_in
++file = '.ibs'
++ model = '' type =slow buffer= input_output
++power = off
+v_en nd_en 0 1
+.ends
+"""
+        subs = spice.parse_subckts(src, "ibis.inc")
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0].name, "DQ_IBIS")
+        self.assertEqual(subs[0].ports,
+                         ["nd_in", "nd_out", "nd_pu", "nd_pd"])
+        self.assertEqual(subs[0].params, {})
+
+    def test_equals_spacing_variants(self):
+        toks = spice._tokenize("b a b file = 'x.ibs' type =slow buffer= io "
+                               "power=off")
+        self.assertEqual(toks, ["b", "a", "b", "file='x.ibs'", "type=slow",
+                                "buffer=io", "power=off"])
+
     def test_bus_expand(self):
         self.assertEqual(spice.expand_bus("DQ[3:0]"),
                          ["DQ[3]", "DQ[2]", "DQ[1]", "DQ[0]"])
