@@ -139,6 +139,61 @@ class TestExtends(unittest.TestCase):
         self.assertRaises(config.ConfigError, config.load, p)
 
 
+class TestModelFileExpansion(unittest.TestCase):
+    """Model trees are one directory per stage; listing files by hand is not
+    how anyone wants to write a config."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        for stage in ("0_soc_io", "1_soc_rdl", "2_soc_pkg"):
+            d = os.path.join(self.dir, "models", stage)
+            os.makedirs(d)
+            with open(os.path.join(d, "m.inc"), "w") as fh:
+                fh.write(".subckt %s a b\n.ends\n" % stage)
+            with open(os.path.join(d, "notes.txt"), "w") as fh:
+                fh.write("not a model\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def cfg_with(self, files):
+        raw = {"models": {"files": files},
+               "instances": [{"name": "X1", "subckt": "cell"}]}
+        return config.normalize(raw, base_dir=self.dir)
+
+    def paths(self, cfg):
+        return [os.path.relpath(e["path"], self.dir)
+                for e in cfg["models"]["files"]]
+
+    def test_recursive_glob_keeps_stage_order(self):
+        cfg = self.cfg_with(["models/**/*.inc"])
+        self.assertEqual(self.paths(cfg),
+                         ["models/0_soc_io/m.inc",
+                          "models/1_soc_rdl/m.inc",
+                          "models/2_soc_pkg/m.inc"])
+
+    def test_directory_entry_picks_model_extensions_only(self):
+        cfg = self.cfg_with(["models/1_soc_rdl"])
+        self.assertEqual(self.paths(cfg), ["models/1_soc_rdl/m.inc"])
+
+    def test_plain_file_still_works(self):
+        cfg = self.cfg_with(["models/0_soc_io/m.inc"])
+        self.assertEqual(self.paths(cfg), ["models/0_soc_io/m.inc"])
+
+    def test_glob_matching_nothing_is_an_error(self):
+        self.assertRaises(config.ConfigError, self.cfg_with,
+                          ["models/*/nope*.inc"])
+
+    def test_directory_with_no_models_is_an_error(self):
+        os.makedirs(os.path.join(self.dir, "empty"))
+        self.assertRaises(config.ConfigError, self.cfg_with, ["empty"])
+
+    def test_dict_entry_keys_carry_to_every_match(self):
+        cfg = self.cfg_with([{"path": "models/**/*.inc", "section": "tt"}])
+        self.assertEqual([e["section"] for e in cfg["models"]["files"]],
+                         ["tt", "tt", "tt"])
+
+
 class TestExamplesEndToEnd(unittest.TestCase):
     """The shipped examples must generate cleanly - they are the smoke test."""
 

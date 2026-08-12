@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 83개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 89개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -235,7 +235,10 @@ net 이름은 SPICE 규칙대로 대소문자를 구분하지 않습니다 (`PAD
   },
 
   "models": {
-    "files": ["a.inc", {"path": "b.lib", "section": "tt"}],
+    // 파일 / 디렉토리 / 글롭 다 됨. 매치 결과는 정렬되므로
+    // models/0_soc_io, 1_soc_rdl ... 처럼 번호를 붙여두면 stage 순서대로 나옴
+    "files": ["models/**/*.inc", "models/3_board", {"path": "b.lib", "section": "tt"}],
+    "extensions": [".inc", ".sp", ".spi", ".lib", ".cir", ".mod", ".net"],
     "search_dirs": ["/proj/models"],    // include 따라갈 때 탐색 경로
     "follow_includes": false,           // .include/.lib 를 재귀적으로 따라감
     "expand_buses": false,              // .subckt 의 DQ[7:0] 을 비트로 펼침

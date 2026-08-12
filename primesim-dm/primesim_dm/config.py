@@ -9,6 +9,7 @@ in a repo and reviewed like source):
 Everything else is plain ``json``, so no third-party YAML dependency.
 """
 
+import glob as globmod
 import json
 import os
 import re
@@ -75,6 +76,7 @@ DEFAULTS = {
     },
     "models": {
         "files": [],
+        "extensions": [".inc", ".sp", ".spi", ".lib", ".cir", ".mod", ".net"],
         "search_dirs": [],
         "follow_includes": False,
         "expand_buses": False,
@@ -233,18 +235,46 @@ def normalize(raw, base_dir="."):
         return p if os.path.isabs(p) else os.path.normpath(
             os.path.join(base_dir, p))
 
+    exts = tuple(e.lower() for e in cfg["models"]["extensions"])
+
+    def expand(pattern):
+        """A models.files entry may be a file, a directory or a glob.
+
+        Model trees are usually one directory per stage (0_soc_io,
+        1_soc_rdl, ...), so listing every file by hand is busywork.  Matches
+        are sorted, which makes a numbered layout come out in stage order.
+        """
+        if any(c in pattern for c in "*?["):
+            hits = globmod.glob(pattern, recursive=True)
+            found = sorted(h for h in hits if os.path.isfile(h))
+            if not found:
+                raise ConfigError("models.files pattern matched nothing: %s"
+                                  % pattern)
+            return found
+        if os.path.isdir(pattern):
+            found = sorted(
+                os.path.join(pattern, n) for n in os.listdir(pattern)
+                if n.lower().endswith(exts)
+                and os.path.isfile(os.path.join(pattern, n)))
+            if not found:
+                raise ConfigError(
+                    "models.files directory %s holds no model file (looked "
+                    "for %s)" % (pattern, ", ".join(exts)))
+            return found
+        return [pattern]
+
     files = []
     for entry in cfg["models"]["files"]:
         if isinstance(entry, str):
-            files.append({"path": abspath(entry)})
-        elif isinstance(entry, dict):
-            if "path" not in entry:
-                raise ConfigError("models.files entry needs a 'path'")
-            e = dict(entry)
-            e["path"] = abspath(entry["path"])
-            files.append(e)
-        else:
+            entry = {"path": entry}
+        elif not isinstance(entry, dict):
             raise ConfigError("models.files entries must be a string or object")
+        if "path" not in entry:
+            raise ConfigError("models.files entry needs a 'path'")
+        for path in expand(abspath(entry["path"])):
+            e = dict(entry)
+            e["path"] = path
+            files.append(e)
     cfg["models"]["files"] = files
     cfg["models"]["search_dirs"] = [abspath(d)
                                     for d in cfg["models"]["search_dirs"]]
