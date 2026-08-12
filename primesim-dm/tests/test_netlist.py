@@ -145,7 +145,7 @@ class TestTermination(unittest.TestCase):
     def test_open_is_not_reported_as_floating(self):
         _cfg, nl = build({"naming": {"rules": [
             {"match": "^SPARE", "action": "terminate", "type": "open"}]}})
-        self.assertEqual(nl.warnings, [])
+        self.assertEqual([w for w in nl.warnings if "SPARE" in w], [])
         self.assertTrue(nets_of(nl)["SPARE0"] in nl.open_nets)
 
     def test_floating_net_is_auto_terminated(self):
@@ -154,11 +154,21 @@ class TestTermination(unittest.TestCase):
                                           "default": {"type": "rload",
                                                       "to": "VSS",
                                                       "value": "1T"}}})
-        touched = set()
-        for e in nl.term_elements:
-            touched.add(e.comment)
+        touched = set(e.comment for e in nl.term_elements)
         self.assertIn("X1.OUT[1]", touched)
-        self.assertEqual(nl.warnings, [])
+        # nothing in the config anticipated it, so it is still flagged
+        self.assertTrue(any("OUT[1]" in w for w in nl.warnings))
+
+    def test_anticipated_auto_term_is_quiet(self):
+        # an override saying "outputs get a cap" means we meant it
+        _cfg, nl = build({"termination": {
+            "auto_terminate_floating": True,
+            "default": {"type": "rload", "to": "VSS", "value": "1T"},
+            "overrides": [{"match": "^OUT", "type": "cload", "to": "VSS",
+                           "value": "5f"}]}})
+        self.assertEqual([w for w in nl.warnings if "OUT[" in w], [])
+        els = [e for e in nl.term_elements if e.comment == "X1.OUT[1]"]
+        self.assertEqual(els[0].kind, "C")
 
     def test_floating_can_be_left_alone(self):
         _cfg, nl = build({"termination": {"auto_terminate_floating": False}})

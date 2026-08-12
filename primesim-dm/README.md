@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 49개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 50개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -119,6 +119,19 @@ python3 -m primesim_dm check my_deck.jsonc
 (3)은 **연결된 게 하나뿐인 net**(= 한쪽 끝이 뜬 노드)을 찾아 자동으로 부하를 답니다.
 실수로 빠뜨린 출력 핀을 잡아주는 안전망입니다. 이때 `tie` 는 실신호를 레일에 쇼트시키므로
 자동 처리 시에는 `rload` 로 낮춰서 적용합니다.
+
+여기서 중요한 건 **안전망이 진짜 실수를 덮지 않는 것**입니다. 자동 터미네이션이 걸렸는데
+`termination.overrides` 나 인스턴스 `termination` 으로 "이 핀은 부하가 없는 게 정상"이라고
+미리 밝혀두지 않은 포트는 **경고로 올라옵니다**. 룰의 net 이름을 잘못 써서 두 블록이 안 이어진
+경우가 정확히 여기 걸립니다 (`--strict` 면 exit 1).
+
+```
+! XTX.PAD<0> -> txpad<0> was floating and got a rload; no rule or override
+  expected that - is the net name right?
+! XCH.IN<0>  -> txp<0>   was floating and got a rload; ...
+```
+
+양쪽 다 뜬 걸로 잡히므로 `txpad<n>` 과 `txp<n>` 이 어긋났다는 게 바로 보입니다.
 
 터미네이션 타입:
 

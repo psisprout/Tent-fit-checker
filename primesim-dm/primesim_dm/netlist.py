@@ -11,6 +11,7 @@ This is where the actual "auto setup" happens:
      reported and (optionally) terminated too.
 """
 
+import difflib
 import re
 
 from . import spice
@@ -98,6 +99,7 @@ class Netlist(object):
         self.warnings = []
         self.net_users = {}          # net -> list of "INST.PORT" strings
         self.open_nets = set()       # deliberately left open (type: open)
+        self.auto_terminated = []    # bindings the floating pass loaded
 
     def nets(self):
         return sorted(self.net_users)
@@ -145,8 +147,11 @@ class Resolver(object):
         name = inst["subckt"]
         cands = self.index.get(name.lower(), [])
         if not cands:
-            close = [s for s in sorted(self.index)
-                     if name.lower() in s or s in name.lower()]
+            close = difflib.get_close_matches(name.lower(), sorted(self.index),
+                                              n=5, cutoff=0.6)
+            close += [s for s in sorted(self.index)
+                      if (name.lower() in s or s in name.lower())
+                      and s not in close]
             hint = (" did you mean: %s?" % ", ".join(close[:5])) if close else ""
             raise NetlistError(
                 "instance %s: subckt %r not found in the scanned model files.%s"
@@ -166,6 +171,20 @@ class Resolver(object):
         return cands[0]
 
     # -- termination -----------------------------------------------------
+    def _term_anticipated(self, inst, port):
+        """True if the config says something about terminating this port.
+
+        Used to tell "an output nobody loads, and we said so" apart from "a
+        link that silently failed to join up" - only the latter is worth a
+        warning when the floating pass cleans it up.
+        """
+        if inst.get("termination"):
+            return True
+        for rx, _r, _where in self._term_overrides:
+            if rx.search(port):
+                return True
+        return False
+
     def _term_spec(self, inst, port, rule=None):
         spec = dict(self.term_cfg["default"])
         for rx, r, _where in self._term_overrides:
@@ -392,8 +411,8 @@ class Resolver(object):
             if binding is None or binding.terminated:
                 self.warn("floating net %s (only %s) - left as is" % (net, user))
                 continue
-            spec = self._term_spec(
-                self._inst_cfg(nl, binding.inst) or {}, binding.port)
+            inst_cfg = self._inst_cfg(nl, binding.inst) or {}
+            spec = self._term_spec(inst_cfg, binding.match_name)
             if spec.get("type") == "tie":
                 spec = dict(spec)
                 spec["type"] = "rload"     # never short a real signal to a rail
@@ -401,6 +420,14 @@ class Resolver(object):
             binding.origin = binding.origin + "+auto-term"
             binding.detail = (binding.detail + "; floating -> %s"
                               % spec.get("type"))
+            nl.auto_terminated.append(binding)
+            # nothing in the config anticipated this pin being unloaded, so it
+            # is more likely a rule that failed to join two blocks up
+            if not self._term_anticipated(inst_cfg, binding.match_name):
+                self.warn("%s.%s -> %s was floating and got a %s; no rule or "
+                          "override expected that - is the net name right?"
+                          % (binding.inst, binding.port, net,
+                             spec.get("type")))
         self._index_nets(nl)
 
     @staticmethod
