@@ -84,6 +84,7 @@ class Deck(object):
         self.searched_dirs = []
         self.opaque_files = []     # read for .subckt interfaces only
         self.skipped_files = []    # not read at all
+        self.unused_filters = []   # --opaque/--skip patterns that hit nothing
         self.depth_limited = []    # includes below these were not followed
         self.net_users = {}        # net -> [(element, port_index)]
 
@@ -151,6 +152,54 @@ def _split_nodes(tokens, kind, deck_subckts):
     return tokens[:count], tokens[count:]
 
 
+class PathFilter(object):
+    """Match paths by literal path when the pattern is one, else by regex.
+
+    People reach for --skip by pasting a path straight out of the report,
+    and a path is not a safe regex: ``/proj/a+b(1)/abc.lib`` compiles to
+    something that matches nothing at all, silently.  So a pattern that
+    exists on disk is compared literally - a directory matching everything
+    beneath it - and only patterns that are not real paths are treated as
+    regexes.
+    """
+
+    def __init__(self, patterns):
+        self.entries = []
+        for pattern in patterns or []:
+            expanded = os.path.expandvars(os.path.expanduser(pattern))
+            if os.path.isdir(expanded):
+                self.entries.append(
+                    ("dir", os.path.abspath(expanded) + os.sep, pattern))
+            elif os.path.exists(expanded):
+                self.entries.append(
+                    ("file", os.path.abspath(expanded), pattern))
+            else:
+                self.entries.append(("re", re.compile(pattern, re.I), pattern))
+        self.used = set()
+
+    def __bool__(self):
+        return bool(self.entries)
+
+    __nonzero__ = __bool__
+
+    def matches(self, path):
+        full = os.path.abspath(path)
+        for kind, value, pattern in self.entries:
+            if kind == "dir":
+                hit = full.startswith(value)
+            elif kind == "file":
+                hit = full == value
+            else:
+                hit = bool(value.search(path))
+            if hit:
+                self.used.add(pattern)
+                return True
+        return False
+
+    def unused(self):
+        return [p for _k, _v, p in self.entries if p not in self.used]
+
+
 def resolve_dirs(base_dir, deck_dirs, search_dirs):
     """Where to look for a relative include, most specific first.
 
@@ -190,9 +239,8 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True,
     one is not opened at all.  ``max_depth`` stops the walk after N levels of
     include.
     """
-    opaque_rx = [re.compile(p, re.I)
-                 for p in (DEFAULT_OPAQUE if opaque is None else opaque)]
-    skip_rx = [re.compile(p, re.I) for p in skip]
+    opaque_f = PathFilter(DEFAULT_OPAQUE if opaque is None else opaque)
+    skip_f = PathFilter(skip)
 
     deck = Deck()
     # a file can legitimately be read twice under two different .lib
@@ -211,7 +259,7 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True,
         if (path, section) in seen:
             continue
         seen.add((path, section))
-        if depth and any(rx.search(path) for rx in skip_rx):
+        if depth and skip_f.matches(path):
             deck.skipped_files.append(path)
             continue
         if not os.path.isfile(path):
@@ -224,7 +272,7 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True,
             # sections in the file are definitions nobody activated
             text = spice.select_lib_section(text, section)
 
-        if depth and any(rx.search(path) for rx in opaque_rx):
+        if depth and opaque_f.matches(path):
             # interface only: the ports are what the deck connects to
             for sub in spice.parse_subckts(text, path):
                 deck.subckts.setdefault(sub.name.lower(), sub)
@@ -296,5 +344,10 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True,
                 Element(name, kind, [norm(n) for n in nodes], tail,
                         path, lineno))
 
+    for pattern in skip_f.unused():
+        deck.unused_filters.append(("--skip", pattern))
+    if opaque is not None:
+        for pattern in opaque_f.unused():
+            deck.unused_filters.append(("--opaque", pattern))
     deck.index_nets()
     return deck

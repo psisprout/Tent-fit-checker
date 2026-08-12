@@ -94,6 +94,13 @@ class Checker(object):
                         ", ".join(self.deck.searched_dirs[:4])
                         or "(none)"))
 
+    def check_filters(self):
+        for flag, pattern in self.deck.unused_filters:
+            self.add(SEV_WARN, "filter-unused",
+                     "%s %r matched no file. A path with regex characters "
+                     "(+ ( ) [ ]) only matches literally if it exists on "
+                     "disk - check the spelling." % (flag, pattern))
+
     def check_unparsed(self):
         if not self.deck.unparsed:
             return
@@ -187,6 +194,7 @@ class Checker(object):
 
     def run(self):
         self.check_includes()
+        self.check_filters()
         self.check_unparsed()
         self.check_duplicate_names()
         self.check_instances()

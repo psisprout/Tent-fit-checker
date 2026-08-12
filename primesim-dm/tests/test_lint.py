@@ -296,6 +296,46 @@ class TestBoundaries(Harness):
         self.assertIn("io_cell", capped.subckts)
         self.assertEqual(len(capped.depth_limited), 1)
 
+    def test_a_full_path_is_matched_literally(self):
+        # a pasted path is not a safe regex - '+' and '()' would make it
+        # match nothing at all
+        odd = os.path.join(self.dir, "a+b(1)")
+        os.makedirs(odd)
+        with open(os.path.join(odd, "pdk.lib"), "w") as fh:
+            fh.write(".model nch nmos\n")
+        self.write("io.inc", ".include '%s'\n%s"
+                   % (os.path.join(odd, "pdk.lib"), self.IO_SPF))
+        p = self.write("top.sp", ".include 'io.inc'\n" + self.TOP)
+        dk = deck.read([p], skip=[os.path.join(odd, "pdk.lib")])
+        self.assertEqual(len(dk.skipped_files), 1)
+        self.assertEqual(dk.unused_filters, [])
+
+    def test_a_directory_skips_everything_under_it(self):
+        sub = os.path.join(self.dir, "pdk")
+        os.makedirs(sub)
+        for i in (1, 2):
+            with open(os.path.join(sub, "m%d.lib" % i), "w") as fh:
+                fh.write(".model nch nmos\n")
+        self.write("io.inc", ".include '%s'\n.include '%s'\n%s"
+                   % (os.path.join(sub, "m1.lib"),
+                      os.path.join(sub, "m2.lib"), self.IO_SPF))
+        p = self.write("top.sp", ".include 'io.inc'\n" + self.TOP)
+        dk = deck.read([p], skip=[sub])
+        self.assertEqual(len(dk.skipped_files), 2)
+
+    def test_a_pattern_that_matches_nothing_is_reported(self):
+        p = self.write("top.sp", self.TOP)
+        dk = deck.read([p], skip=["/no/such/path.lib"])
+        self.assertEqual(len(dk.unused_filters), 1)
+        codes = [f.code for f in check.Checker(dk).run()]
+        self.assertIn("filter-unused", codes)
+
+    def test_a_regex_that_matches_is_not_reported_unused(self):
+        self.write("io.spf", self.IO_SPF)
+        p = self.write("top.sp", ".include 'io.spf'\n" + self.TOP)
+        dk = deck.read([p], skip=[r"\.spf$"])
+        self.assertEqual(dk.unused_filters, [])
+
     def test_the_top_deck_is_never_skipped_or_made_opaque(self):
         p = self.write("top.spf", self.TOP)
         dk = deck.read([p], skip=[r"\.spf$"])

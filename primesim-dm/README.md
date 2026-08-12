@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 123개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 127개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
