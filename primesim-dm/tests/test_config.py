@@ -162,7 +162,8 @@ class TestModelFileExpansion(unittest.TestCase):
         return config.normalize(raw, base_dir=self.dir)
 
     def paths(self, cfg):
-        return [os.path.relpath(e["path"], self.dir)
+        # normalise the separator: relpath yields backslashes on Windows
+        return [os.path.relpath(e["path"], self.dir).replace(os.sep, "/")
                 for e in cfg["models"]["files"]]
 
     def test_recursive_glob_keeps_stage_order(self):
