@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 50개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 83개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -53,8 +53,59 @@ python3 -m primesim_dm check my_deck.jsonc
 | `init`  | 모델 파일에서 config 뼈대 생성 |
 | `gen`   | config → 덱 `.sp` + `.sp.report.txt` |
 | `check` | 덱은 안 쓰고 결선 리포트만 출력 (룰 튜닝용) |
+| `lint`  | **이미 있는 덱(.sp)을 읽어서 구조·연결성 검사.** config 불필요 |
 
 `gen`/`check` 에 `--strict` 를 주면 경고가 하나라도 있을 때 exit code 1 → 회귀 스크립트에 물리기 좋습니다.
+
+## 2-1. `lint` — 기존 덱 검사 (설정 없이)
+
+`gen`/`check` 는 이 도구가 만든 config가 있어야 하지만, `lint` 는 **덱 파일만 있으면 됩니다.**
+손으로 만든 덱, 남이 준 덱, 예전 프로젝트 덱에 그대로 돌아갑니다.
+
+```bash
+python3 -m primesim_dm lint /proj/sim/lpddr_write.sp
+python3 -m primesim_dm lint deck.sp --search-dir /proj/models -v
+```
+
+```
+primesim-dm-setup deck check
+==================================================================
+files    : 1
+elements : 13 at the top level
+nets     : 14
+unparsed : 1 line(s)  <- checks below do not cover these
+
+ERROR duplicate-name     element XIO1 is defined twice (first at deck.sp:13)
+ERROR missing-include    cannot find included file: models.inc (from deck.sp:2)
+ERROR port-count         XIO2 passes 4 node(s) to subckt io_cell, which declares 5 port(s)
+ERROR undefined-subckt   XRX1 calls subckt 'mem_io_cell', which is not defined in any file read
+WARN  floating-net       net en_rx is touched only by XRX1 (port 4)
+INFO  merged-net         ball_dq0 and ball_dq1 are one node (Rshort = 0 ohm)
+
+4 error(s), 4 warning(s), 2 note(s)
+```
+
+검사 항목:
+
+| 코드 | 등급 | 내용 |
+|---|---|---|
+| `missing-include` | ERROR | `.include`/`.lib` 경로에 파일이 없음 |
+| `undefined-subckt` | ERROR | X가 부르는 subckt이 어디에도 정의 안 됨 |
+| `port-count` | ERROR | X의 노드 개수 ≠ `.subckt` 포트 개수 |
+| `duplicate-name` | ERROR | 같은 이름 소자가 두 번 |
+| `isolated-instance` | ERROR | 인스턴스의 모든 노드가 다른 데 안 붙음 |
+| `floating-net` | WARN | 한 곳만 붙은 net (`--keep-net` 로 제외 가능) |
+| `unparsed-line` | WARN | 노드를 확정 못 한 줄 — **검사 범위 밖임을 명시** |
+| `merged-net` | INFO | 0옴 저항이나 `.connect` 로 두 net이 사실상 한 노드 |
+
+에러가 있으면 exit 1, `--strict` 면 경고에도 exit 1입니다.
+
+**파싱 못 한 줄은 추측하지 않고 신고합니다.** 소자 종류마다 노드 개수 규칙이 달라서
+(`M`은 4개, `Q`는 3~4개, `W`는 `N=`에 따라, `S`/`B`는 파라미터 직전까지) 전부 맞히는 파서는
+없습니다. 확신이 안 서는 줄은 `unparsed`로 빼고 개수를 헤더에 찍습니다 —
+"이 검사 결과가 덱의 몇 %를 봤는지" 모르면 통과했다는 말에 의미가 없어서입니다.
+
+net 이름은 SPICE 규칙대로 대소문자를 구분하지 않습니다 (`PAD_DQ0` = `pad_dq0`).
 
 ## 3. 결선 규칙 — 우선순위
 

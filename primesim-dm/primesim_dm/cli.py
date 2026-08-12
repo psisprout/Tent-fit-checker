@@ -5,7 +5,9 @@ import json
 import os
 import sys
 
+from . import check as check_mod
 from . import config as config_mod
+from . import deck as deck_mod
 from . import emit
 from . import netlist as netlist_mod
 from . import spice
@@ -210,6 +212,25 @@ def cmd_check(args):
     return 0
 
 
+# ---------------------------------------------------------------- lint
+def cmd_lint(args):
+    dk = deck_mod.read(args.deck,
+                       follow_includes=not args.no_includes,
+                       search_dirs=args.search_dir or [])
+    if not dk.files:
+        return _err("could not read any of: %s" % ", ".join(args.deck))
+    checker = check_mod.Checker(dk, short_ohms=args.short_ohms,
+                                keep_nets=args.keep_net or [])
+    findings = checker.run()
+    counts = checker.counts()
+    sys.stdout.write(check_mod.render(dk, findings, counts, verbose=args.verbose))
+    if counts[check_mod.SEV_ERROR]:
+        return 1
+    if args.strict and counts[check_mod.SEV_WARN]:
+        return 1
+    return 0
+
+
 # ---------------------------------------------------------------- main
 def build_parser():
     p = argparse.ArgumentParser(
@@ -248,6 +269,23 @@ def build_parser():
     s.add_argument("--strict", action="store_true",
                    help="exit non-zero if there are warnings")
     s.set_defaults(func=cmd_gen)
+
+    s = sub.add_parser("lint", help="check an existing deck (.sp) for "
+                                    "connectivity and structural errors")
+    s.add_argument("deck", nargs="+", help="deck file(s) to check")
+    s.add_argument("--no-includes", action="store_true",
+                   help="do not follow .include/.lib")
+    s.add_argument("--search-dir", action="append")
+    s.add_argument("--keep-net", action="append",
+                   help="regex of nets to exempt from the floating check")
+    s.add_argument("--short-ohms", type=float, default=1e-6,
+                   help="resistance at or below which two nets are reported "
+                        "as one node (default 1e-6)")
+    s.add_argument("-v", "--verbose", action="store_true",
+                   help="also show info notes")
+    s.add_argument("--strict", action="store_true",
+                   help="exit non-zero on warnings too")
+    s.set_defaults(func=cmd_lint)
 
     s = sub.add_parser("check", help="print the connectivity report only")
     s.add_argument("config")
