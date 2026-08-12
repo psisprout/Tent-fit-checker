@@ -1,0 +1,121 @@
+// ---------------------------------------------------------------------------
+// HBM TX -> channel -> RX link, built out of the demo models.
+//   python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
+// ---------------------------------------------------------------------------
+{
+  "deck": {
+    "title": "HBM DQ link : tx_drv -> channel -> rx_amp",
+    "output": "out/hbm_tx_rx.sp",
+    "temp": [25],
+    "options": ["post", "accurate"],
+    "width": 88
+  },
+
+  "models": {
+    "files": ["models/hbm_io.inc"]
+  },
+
+  // Rules are tried in order, first match wins.  Applied to every instance
+  // unless the instance has its own rules (those are tried first).
+  "naming": {
+    "case": "lower",        // fold every generated net name to lower case
+    "bus_style": "angle",   // DQ[3] / DQ(3) / DQ<3> all come out as DQ<3>
+    "default": "same_name", // unmatched port -> net of the same name
+    "rules": [
+      // test / scan / spare pins are never driven in this bench
+      { "match": "^TM_",   "action": "terminate", "type": "tie", "to": "vssq" },
+      { "match": "^SCAN_", "action": "terminate", "type": "tie", "to": "vssq" },
+      { "match": "^SPARE", "action": "terminate", "type": "open" },
+      // VDDQ / VSSQ -> vddq / vssq (case rule already does this; kept as an
+      // example of a capture group + transform)
+      { "match": "^V(DD|SS)Q$", "net": "v{1|lower}q" }
+    ]
+  },
+
+  "supplies": [
+    { "net": "vddq", "value": 1.1 },
+    { "net": "vssq", "value": 0 }
+  ],
+
+  "termination": {
+    "auto_terminate_floating": true,       // a net only one pin touches
+    "net_prefix": "n_",
+    "default": { "type": "rload", "to": "vssq", "value": "1T" },
+    "overrides": [
+      { "match": "^DOUT", "type": "cload", "to": "vssq", "value": "10f" },
+      { "match": "^OFFSET", "type": "tie", "to": "vssq" }
+    ]
+  },
+
+  "instances": [
+    {
+      "name": "XTX",
+      "subckt": "hbm_tx_drv",
+      "comment": "output driver, 4 segments",
+      "params": { "seg": 4, "rterm": 34 },
+      "rules": [
+        { "match": "^DIN<(\\d+)>$",     "net": "txd<{1}>" },
+        { "match": "^PAD<(\\d+)>$",     "net": "txp<{1}>" },
+        { "match": "^ZQ_CODE<(\\d+)>$", "net": "zq<{1}>" }
+      ],
+      "connect": { "EN_TX": "en_tx" }
+    },
+    {
+      "name": "XCH",
+      "subckt": "hbm_channel",
+      "comment": "package + microbump channel",
+      "params": { "zo": 50, "td": "30p" },
+      "rules": [
+        { "match": "^IN<(\\d+)>$",  "net": "txp<{1}>" },
+        { "match": "^OUT<(\\d+)>$", "net": "rxp<{1}>" }
+      ]
+    },
+    {
+      "name": "XRX",
+      "subckt": "hbm_rx_amp",
+      "comment": "receiver / sense amp",
+      "params": { "cload": "5f" },
+      "rules": [
+        { "match": "^PAD<(\\d+)>$",  "net": "rxp<{1}>" },
+        { "match": "^DOUT<(\\d+)>$", "net": "rxd<{1}>" }
+      ],
+      "connect": { "CLK_R": "clk", "CLKB_R": "clkb", "EN_RX": "en_rx" },
+      "unused": ["^OFFSET<"]
+    },
+    {
+      "name": "XVREF",
+      "subckt": "hbm_vref_gen",
+      "comment": "internal VREF, trim pins tied off",
+      "connect": { "EN_VREF": "vddq" },
+      "unused": ["^TRIM<"],
+      "termination": { "type": "tie", "to": "vssq" }
+    }
+  ],
+
+  "stimulus": [
+    "Vzq0 zq<0> 0 DC 1.1",
+    "Vzq1 zq<1> 0 DC 0",
+    "Vzq2 zq<2> 0 DC 1.1",
+    "Ven_tx en_tx 0 DC 1.1",
+    "Ven_rx en_rx 0 DC 1.1",
+    "Vclk  clk  0 PULSE 0 1.1 0 20p 20p 230p 500p",
+    "Vclkb clkb 0 PULSE 1.1 0 0 20p 20p 230p 500p",
+    "Vd0 txd<0> 0 PULSE 0 1.1 0 15p 15p 235p 500p",
+    "Vd1 txd<1> 0 PULSE 1.1 0 0 15p 15p 235p 500p",
+    "Vd2 txd<2> 0 PULSE 0 1.1 0 15p 15p 485p 1000p",
+    "Vd3 txd<3> 0 PULSE 1.1 0 0 15p 15p 485p 1000p"
+  ],
+
+  "analysis": {
+    "tran": { "step": "1p", "stop": "20n" }
+  },
+
+  "probes": [
+    "v(txp<0>) v(rxp<0>) v(rxd<0>)",
+    "v(vref)"
+  ],
+
+  "measures": [
+    ".meas tran vout_pp pp v(rxd<0>) from=2n to=20n"
+  ]
+}
