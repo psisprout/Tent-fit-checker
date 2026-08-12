@@ -63,8 +63,9 @@ GROUND_NAMES = ("0", "gnd", "gnd!", "vss", "0.0")
 
 class Checker(object):
     def __init__(self, deck, short_ohms=1e-6, ground_names=None,
-                 keep_nets=()):
+                 keep_nets=(), force_connectivity=False):
         self.deck = deck
+        self.force_connectivity = force_connectivity
         self.short_ohms = short_ohms
         self.ground = set(n.lower() for n in (ground_names or ("0", "gnd")))
         self.keep = [re.compile(p) for p in keep_nets]
@@ -75,10 +76,23 @@ class Checker(object):
         self.findings.append(Finding(sev, code, msg, where))
 
     # -- individual checks ----------------------------------------------
+    @property
+    def netlist_incomplete(self):
+        """True when part of the netlist was never read."""
+        return bool(self.deck.missing_includes)
+
     def check_includes(self):
         for miss in self.deck.missing_includes:
             self.add(SEV_ERROR, "missing-include",
                      "cannot find included file: %s" % miss)
+        if self.netlist_incomplete:
+            self.add(SEV_ERROR, "missing-include",
+                     "%d include(s) could not be read, so part of the netlist "
+                     "is missing. Directories tried: %s. Add --search-dir for "
+                     "the rest."
+                     % (len(self.deck.missing_includes),
+                        ", ".join(self.deck.searched_dirs[:4])
+                        or "(none)"))
 
     def check_unparsed(self):
         if not self.deck.unparsed:
@@ -177,8 +191,21 @@ class Checker(object):
         self.check_duplicate_names()
         self.check_instances()
         self.check_merged_nets()
-        self.check_unconnected_instances()
-        self.check_floating()
+        if self.netlist_incomplete and not self.force_connectivity:
+            # Every element inside an unread file is missing from the graph,
+            # so its nets look one-sided. Reporting hundreds of those as
+            # findings would bury the one problem that caused them.
+            n_float = sum(1 for net, users in self.deck.net_users.items()
+                          if len(users) < 2 and net not in self.ground
+                          and net not in self.deck.globals)
+            self.add(SEV_WARN, "checks-skipped",
+                     "connectivity checks (floating-net, isolated-instance) "
+                     "skipped: the netlist is incomplete, and roughly %d net(s) "
+                     "look one-sided purely because of that. Fix the includes "
+                     "first, or pass --force-connectivity." % n_float)
+        else:
+            self.check_unconnected_instances()
+            self.check_floating()
         self.findings.sort(key=lambda f: (_ORDER[f.severity], f.code))
         return self.findings
 

@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 107개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 111개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -104,8 +104,31 @@ python3 -m primesim_dm check my_deck.jsonc
 python3 -m primesim_dm lint /proj/sim/lpddr_write.sp
 ```
 
-`.include` 상대경로는 **그 파일 위치 기준**으로 풀립니다. 환경변수(`$MODELS/...`)도 전개됩니다.
-그래도 못 찾는 경로가 있으면 `--search-dir` 를 추가하세요 (여러 번 가능).
+`.include` 상대경로는 이 순서로 찾습니다:
+
+1. **그 `.include` 를 적은 파일**의 디렉토리
+2. **최상위 덱**의 디렉토리 ← 라이브러리 안의 `./DB/x.sp` 가 보통 여기 기준입니다
+3. 현재 작업 디렉토리
+4. `--search-dir` 로 준 경로들 (여러 번 가능)
+
+환경변수(`$MODELS/...`)도 전개됩니다. 그래도 못 찾으면 시도한 디렉토리를 에러에 찍어줍니다.
+
+### 못 읽은 파일이 있으면 연결성 검사를 건너뜁니다
+
+`.include` 하나를 못 읽으면 그 안의 소자가 통째로 빠지고, 그 소자에 붙어 있던 net들이
+전부 "한쪽만 연결됨"으로 보입니다. 파일 하나 때문에 `floating-net` 수백 개가 쏟아지면
+정작 원인인 그 한 줄이 묻힙니다.
+
+그래서 **읽지 못한 include가 하나라도 있으면 `floating-net` / `isolated-instance` 검사를
+아예 돌리지 않고** 이렇게 알려줍니다:
+
+```
+WARN  checks-skipped   connectivity checks skipped: the netlist is incomplete,
+                       and roughly 98 net(s) look one-sided purely because of
+                       that. Fix the includes first, or pass --force-connectivity.
+```
+
+include를 먼저 해결하고 다시 돌리는 게 맞습니다. 굳이 보고 싶으면 `--force-connectivity`.
 
 ```
 primesim-dm-setup deck check

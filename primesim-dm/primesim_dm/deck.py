@@ -76,6 +76,7 @@ class Deck(object):
         self.unparsed = []         # (path, line, text, reason)
         self.files = []
         self.missing_includes = []
+        self.searched_dirs = []
         self.net_users = {}        # net -> [(element, port_index)]
 
     def index_nets(self):
@@ -142,14 +143,31 @@ def _split_nodes(tokens, kind, deck_subckts):
     return tokens[:count], tokens[count:]
 
 
-def _resolve(raw, base_dir, search_dirs):
+def resolve_dirs(base_dir, deck_dirs, search_dirs):
+    """Where to look for a relative include, most specific first.
+
+    A ``.include './DB/x.sp'`` inside a library is not necessarily relative
+    to that library: SPICE resolves it against the directory the simulator
+    was launched from, which in practice is where the top deck lives.  So
+    the including file's directory is tried first, then the top deck's, then
+    the current directory, then anything --search-dir added.
+    """
+    out = []
+    for d in [base_dir] + list(deck_dirs) + [os.getcwd()] + list(search_dirs):
+        d = os.path.abspath(d)
+        if d not in out:
+            out.append(d)
+    return out
+
+
+def _resolve(raw, dirs):
     raw = os.path.expandvars(os.path.expanduser(raw))
-    cands = [raw] if os.path.isabs(raw) else [os.path.join(base_dir, raw)]
-    if not os.path.isabs(raw):
-        cands += [os.path.join(d, raw) for d in search_dirs]
-    for c in cands:
-        if os.path.isfile(c):
-            return c
+    if os.path.isabs(raw):
+        return raw if os.path.isfile(raw) else None
+    for d in dirs:
+        cand = os.path.join(d, raw)
+        if os.path.isfile(cand):
+            return cand
     return None
 
 
@@ -158,6 +176,8 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
     deck = Deck()
     queue = list(paths)
     seen = set()
+    deck_dirs = [os.path.dirname(os.path.abspath(p)) for p in paths]
+    deck.searched_dirs = []
 
     def norm(net):
         return net.lower() if fold_case else net
@@ -190,7 +210,11 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
             if _DOT_INCLUDE.match(line) or _DOT_LIB.match(line):
                 raw = spice.include_path(line)
                 if raw:
-                    target = _resolve(raw, base_dir, search_dirs)
+                    dirs = resolve_dirs(base_dir, deck_dirs, search_dirs)
+                    for d in dirs:
+                        if d not in deck.searched_dirs:
+                            deck.searched_dirs.append(d)
+                    target = _resolve(raw, dirs)
                     if target is None:
                         deck.missing_includes.append(
                             "%s (from %s:%d)" % (raw, os.path.basename(path),

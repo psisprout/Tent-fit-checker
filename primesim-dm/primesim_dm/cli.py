@@ -220,7 +220,8 @@ def cmd_lint(args):
     if not dk.files:
         return _err("could not read any of: %s" % ", ".join(args.deck))
     checker = check_mod.Checker(dk, short_ohms=args.short_ohms,
-                                keep_nets=args.keep_net or [])
+                                keep_nets=args.keep_net or [],
+                                force_connectivity=args.force_connectivity)
     findings = checker.run()
     counts = checker.counts()
     sys.stdout.write(check_mod.render(
@@ -285,6 +286,9 @@ def build_parser():
                         "as one node (default 1e-6)")
     s.add_argument("-v", "--verbose", action="store_true",
                    help="also show info notes")
+    s.add_argument("--force-connectivity", action="store_true",
+                   help="run the floating/isolated checks even when includes "
+                        "are missing (results will be noisy)")
     s.add_argument("--summary", action="store_true",
                    help="counts per finding kind only, no individual lines")
     s.add_argument("--limit", type=int, default=10,

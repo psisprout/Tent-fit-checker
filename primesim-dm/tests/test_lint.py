@@ -123,6 +123,50 @@ class TestIncludeFollowing(Harness):
         self.assertEqual(dk.missing_includes, [])
 
 
+class TestIncompleteNetlist(Harness):
+    """A '.include' inside a library is often relative to the run directory,
+    not to the library - and when one cannot be read, everything the checker
+    concludes about connectivity is downstream of that."""
+
+    def test_include_resolves_against_the_top_deck_directory(self):
+        os.makedirs(os.path.join(self.dir, "run", "DB"))
+        os.makedirs(os.path.join(self.dir, "lib"))
+        with open(os.path.join(self.dir, "lib", "ch.lib"), "w") as fh:
+            fh.write(".include './DB/inst.sp'\n")
+        with open(os.path.join(self.dir, "run", "DB", "inst.sp"), "w") as fh:
+            fh.write(".subckt rdl a b\nR1 a b 0.1\n.ends\n")
+        top = os.path.join(self.dir, "run", "top.sp")
+        with open(top, "w") as fh:
+            fh.write(".include '../lib/ch.lib'\nX1 n1 n2 rdl\nR9 n1 n2 1k\n")
+        dk = deck.read([top])
+        self.assertEqual(dk.missing_includes, [])
+        self.assertIn("rdl", dk.subckts)
+
+    def test_connectivity_checks_are_skipped_when_a_file_is_missing(self):
+        _dk, _c, f = self.lint(".include 'gone.inc'\n"
+                               "X1 a b c io\nR1 z z2 1k\n")
+        codes = [x.code for x in f]
+        self.assertIn("missing-include", codes)
+        self.assertIn("checks-skipped", codes)
+        # the noise these would have produced is suppressed
+        self.assertNotIn("floating-net", codes)
+        self.assertNotIn("isolated-instance", codes)
+
+    def test_force_connectivity_runs_them_anyway(self):
+        _dk, _c, f = self.lint(".include 'gone.inc'\n"
+                               "X1 a b c io\nR1 z z2 1k\n",
+                               force_connectivity=True)
+        codes = [x.code for x in f]
+        self.assertIn("floating-net", codes)
+        self.assertNotIn("checks-skipped", codes)
+
+    def test_complete_netlist_still_runs_them(self):
+        _dk, _c, f = self.lint("R1 a b 1k\nR2 b c 1k\n")
+        codes = [x.code for x in f]
+        self.assertIn("floating-net", codes)
+        self.assertNotIn("checks-skipped", codes)
+
+
 class TestChecks(Harness):
     SUB = ".subckt io_cell VDD VSS PAD DIN\nR1 PAD DIN 1k\n.ends\n"
 
