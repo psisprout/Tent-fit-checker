@@ -237,6 +237,15 @@ def render(deck, findings, counts, verbose=False, limit=10, summary_only=False):
     out.append("elements : %d at the top level" % len(deck.elements))
     out.append("nets     : %d" % len(deck.net_users))
     out.append("subckts  : %d definition(s) available" % len(deck.subckts))
+    if deck.opaque_files:
+        out.append("opaque   : %d file(s) read for interfaces only "
+                   "(insides not checked)" % len(deck.opaque_files))
+    if deck.skipped_files:
+        out.append("skipped  : %d file(s) not opened; subckts defined there "
+                   "will read as undefined" % len(deck.skipped_files))
+    if deck.depth_limited:
+        out.append("depth cap: %d file(s) hit --max-depth; their includes "
+                   "were not followed" % len(deck.depth_limited))
     if deck.unparsed:
         out.append("unparsed : %d line(s)  <- checks below do not cover these"
                    % len(deck.unparsed))

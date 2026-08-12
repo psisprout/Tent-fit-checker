@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 117개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 123개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -112,6 +112,45 @@ python3 -m primesim_dm lint /proj/sim/lpddr_write.sp
 4. `--search-dir` 로 준 경로들 (여러 번 가능)
 
 환경변수(`$MODELS/...`)도 전개됩니다. 그래도 못 찾으면 시도한 디렉토리를 에러에 찍어줍니다.
+
+### 어디까지 읽을지 제한하기 — SPF / PDK
+
+IO 모델을 물면 그 밑에 SPF(기생 추출)와 HSPICE PDK가 줄줄이 딸려옵니다. 파일 수천 개에
+트랜지스터 수십만 개인데, **DM 결선 검사에 필요한 건 IO 모델의 `.subckt` 포트뿐**입니다.
+안쪽은 볼 이유가 없습니다.
+
+경계를 긋는 방법이 세 가지 있습니다.
+
+| 옵션 | 동작 | 쓸 곳 |
+|---|---|---|
+| `--opaque REGEX` | **`.subckt` 인터페이스만** 읽고 내부와 그 아래 include는 안 봄 | IO 모델, SPF. **기본 선택지** |
+| `--skip REGEX` | 아예 안 엶 | PDK 모델 라이브러리처럼 subckt을 안 쓰는 것 |
+| `--max-depth N` | include를 N단계까지만 따라감 | 뭐가 물려 있는지 모를 때 일단 막기 |
+
+```bash
+# IO 모델 안쪽은 인터페이스만, PDK는 통째로 제외
+primesim-dm lint top.sp --opaque '/io_model/' --skip '/pdk/'
+
+# 일단 2단계까지만
+primesim-dm lint top.sp --max-depth 2
+```
+
+**`--opaque` 를 먼저 쓰세요.** 포트 정보는 남으니 `port-count` / `undefined-subckt` 검사가
+그대로 살아 있고, 잃는 건 볼 필요 없던 내부뿐입니다. `--skip` 은 그 파일이 정의한 subckt이
+`undefined-subckt` 로 잡히므로 정말 안 쓰는 파일에만 쓰세요.
+
+`.spf` / `.dspf` / `.spef` / `.rcx` 는 **기본으로 opaque** 입니다 (`--no-default-opaque` 로 해제).
+
+```
+files    : 2          ← 8개에서 줄어듦
+subckts  : 1 definition(s) available
+opaque   : 1 file(s) read for interfaces only (insides not checked)
+```
+
+무엇을 안 봤는지 헤더에 항상 찍힙니다. 검사 범위를 모르면 "문제 없음"에 의미가 없어서입니다.
+
+> 패턴은 **전체 경로**에 걸리는 정규식입니다. `pdk` 처럼 짧게 쓰면 상위 디렉토리 이름에도
+> 걸리니 `/pdk/` 나 `\.spf$` 처럼 앵커를 넣으세요.
 
 ### `.lib` 는 지정한 섹션만 읽습니다
 

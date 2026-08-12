@@ -214,9 +214,16 @@ def cmd_check(args):
 
 # ---------------------------------------------------------------- lint
 def cmd_lint(args):
+    opaque = args.opaque or None
+    if args.opaque and not args.no_default_opaque:
+        opaque = list(deck_mod.DEFAULT_OPAQUE) + args.opaque
+    elif args.no_default_opaque:
+        opaque = args.opaque or []
     dk = deck_mod.read(args.deck,
                        follow_includes=not args.no_includes,
-                       search_dirs=args.search_dir or [])
+                       search_dirs=args.search_dir or [],
+                       opaque=opaque, skip=args.skip or [],
+                       max_depth=args.max_depth)
     if not dk.files:
         return _err("could not read any of: %s" % ", ".join(args.deck))
     checker = check_mod.Checker(dk, short_ohms=args.short_ohms,
@@ -286,6 +293,17 @@ def build_parser():
                         "as one node (default 1e-6)")
     s.add_argument("-v", "--verbose", action="store_true",
                    help="also show info notes")
+    s.add_argument("--opaque", action="append", metavar="REGEX",
+                   help="read matching files for their .subckt interfaces "
+                        "only, never their insides (default: %s)"
+                        % ", ".join(deck_mod.DEFAULT_OPAQUE))
+    s.add_argument("--no-default-opaque", action="store_true",
+                   help="do not apply the built-in opaque patterns")
+    s.add_argument("--skip", action="append", metavar="REGEX",
+                   help="do not open matching files at all (PDK model "
+                        "libraries and the like)")
+    s.add_argument("--max-depth", type=int, metavar="N",
+                   help="follow includes at most N levels deep")
     s.add_argument("--force-connectivity", action="store_true",
                    help="run the floating/isolated checks even when includes "
                         "are missing (results will be noisy)")

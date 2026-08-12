@@ -27,6 +27,11 @@ _KV_TERMINATED = ("S", "B", "P")
 _MODEL_TERMINATED = ("X", "Q", "M", "J", "Z")
 _NO_NODES = ("K",)
 
+# Files whose insides never matter for a DM connectivity check: parasitic
+# extractions are enormous and describe the inside of a cell, not how the
+# link is wired.  Their .subckt interfaces are still read.
+DEFAULT_OPAQUE = [r"\.spf$", r"\.dspf$", r"\.spef$", r"\.rcx$"]
+
 _DOT_CONNECT = re.compile(r"^\s*\.connect\s+(\S+)\s+(\S+)", re.I)
 _DOT_GLOBAL = re.compile(r"^\s*\.global\s+(.*)", re.I)
 _DOT_SUBCKT = re.compile(r"^\s*\.subckt\b", re.I)
@@ -77,6 +82,9 @@ class Deck(object):
         self.files = []
         self.missing_includes = []
         self.searched_dirs = []
+        self.opaque_files = []     # read for .subckt interfaces only
+        self.skipped_files = []    # not read at all
+        self.depth_limited = []    # includes below these were not followed
         self.net_users = {}        # net -> [(element, port_index)]
 
     def index_nets(self):
@@ -171,12 +179,25 @@ def _resolve(raw, dirs):
     return None
 
 
-def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
-    """Parse one or more deck files into a :class:`Deck`."""
+def read(paths, follow_includes=True, search_dirs=(), fold_case=True,
+         opaque=None, skip=(), max_depth=None):
+    """Parse one or more deck files into a :class:`Deck`.
+
+    ``opaque`` and ``skip`` are path patterns that draw a boundary around the
+    parts of the tree a DM check has no business reading - a transistor-level
+    IO model, a PDK, an extracted parasitic file.  An opaque file still gives
+    up its ``.subckt`` interfaces, so port counts stay checkable; a skipped
+    one is not opened at all.  ``max_depth`` stops the walk after N levels of
+    include.
+    """
+    opaque_rx = [re.compile(p, re.I)
+                 for p in (DEFAULT_OPAQUE if opaque is None else opaque)]
+    skip_rx = [re.compile(p, re.I) for p in skip]
+
     deck = Deck()
     # a file can legitimately be read twice under two different .lib
     # sections, so the queue and the seen-set are keyed on both
-    queue = [(p, None) for p in paths]
+    queue = [(p, None, 0) for p in paths]
     seen = set()
     deck_dirs = [os.path.dirname(os.path.abspath(p)) for p in paths]
     deck.searched_dirs = []
@@ -185,11 +206,14 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
         return net.lower() if fold_case else net
 
     while queue:
-        path, section = queue.pop(0)
+        path, section, depth = queue.pop(0)
         path = os.path.abspath(path)
         if (path, section) in seen:
             continue
         seen.add((path, section))
+        if depth and any(rx.search(path) for rx in skip_rx):
+            deck.skipped_files.append(path)
+            continue
         if not os.path.isfile(path):
             deck.missing_includes.append(path)
             continue
@@ -199,10 +223,22 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
             # only the selected .lib section is live; without one, the
             # sections in the file are definitions nobody activated
             text = spice.select_lib_section(text, section)
+
+        if depth and any(rx.search(path) for rx in opaque_rx):
+            # interface only: the ports are what the deck connects to
+            for sub in spice.parse_subckts(text, path):
+                deck.subckts.setdefault(sub.name.lower(), sub)
+            deck.opaque_files.append(path)
+            continue
+
         deck.files.append(path + (" [.lib %s]" % section if section else ""))
 
         for sub in spice.parse_subckts(text, path):
             deck.subckts.setdefault(sub.name.lower(), sub)
+
+        at_limit = max_depth is not None and depth >= max_depth
+        if at_limit and path not in deck.depth_limited:
+            deck.depth_limited.append(path)
 
         depth = 0
         base_dir = os.path.dirname(path)
@@ -227,8 +263,8 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
                         deck.missing_includes.append(
                             "%s (from %s:%d)" % (raw, os.path.basename(path),
                                                  lineno))
-                    elif follow_includes:
-                        queue.append((target, sub_section))
+                    elif follow_includes and not at_limit:
+                        queue.append((target, sub_section, depth + 1))
                 continue
 
             if depth:                      # only the top level is checked

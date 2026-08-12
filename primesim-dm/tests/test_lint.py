@@ -239,6 +239,70 @@ class TestLibSections(Harness):
         self.assertEqual(xff.line, 11)      # its real line in corners.lib
 
 
+class TestBoundaries(Harness):
+    """A DM check has no business reading a transistor-level IO model or the
+    PDK underneath it. Interfaces yes, insides no."""
+
+    IO_SPF = (".subckt io_cell VDD VSS PAD DIN\n"
+              "Xm1 n1 DIN VSS VSS nch w=1u\n"
+              "Cp1 n1 VSS 1.2f\n.ends\n")
+    TOP = ("X1 vdd vss pad din io_cell\nR9 pad vss 1k\n"
+           "V2 vdd 0 DC 1.1\nV3 vss 0 DC 0\nV4 din 0 DC 0\n")
+
+    def test_spf_is_opaque_by_default(self):
+        self.write("io.spf", self.IO_SPF)
+        p = self.write("top.sp", ".include 'io.spf'\n" + self.TOP)
+        dk = deck.read([p])
+        self.assertEqual(len(dk.opaque_files), 1)
+        self.assertEqual(len(dk.files), 1)          # the spf is not listed
+        self.assertIn("io_cell", dk.subckts)        # but its ports are known
+        codes = [f.code for f in check.Checker(dk).run()]
+        self.assertNotIn("undefined-subckt", codes)
+        self.assertNotIn("port-count", codes)
+
+    def test_opaque_still_catches_a_port_count_error(self):
+        self.write("io.spf", self.IO_SPF)
+        p = self.write("top.sp", ".include 'io.spf'\n"
+                                 "X1 vdd vss pad io_cell\nR9 pad vss 1k\n")
+        dk = deck.read([p])
+        self.assertIn("port-count", [f.code for f in check.Checker(dk).run()])
+
+    def test_opting_out_reads_the_spf(self):
+        self.write("io.spf", self.IO_SPF)
+        p = self.write("top.sp", ".include 'io.spf'\n" + self.TOP)
+        dk = deck.read([p], opaque=[])
+        self.assertEqual(dk.opaque_files, [])
+        self.assertEqual(len(dk.files), 2)
+
+    def test_skip_does_not_open_the_file(self):
+        self.write("pdk.lib", ".model nch nmos level=54\n")
+        self.write("io.inc", ".include 'pdk.lib'\n" + self.IO_SPF)
+        p = self.write("top.sp", ".include 'io.inc'\n" + self.TOP)
+        dk = deck.read([p], skip=[r"pdk\.lib$"])
+        self.assertEqual(len(dk.skipped_files), 1)
+        self.assertEqual(dk.missing_includes, [])   # skipped is not missing
+        self.assertIn("io_cell", dk.subckts)
+
+    def test_max_depth_stops_the_walk(self):
+        self.write("deep.inc", ".subckt deep a b\nR1 a b 1k\n.ends\n")
+        self.write("mid.inc", ".include 'deep.inc'\n" + self.IO_SPF)
+        p = self.write("top.sp", ".include 'mid.inc'\n" + self.TOP)
+
+        full = deck.read([p])
+        self.assertIn("deep", full.subckts)
+
+        capped = deck.read([p], max_depth=1)
+        self.assertNotIn("deep", capped.subckts)
+        self.assertIn("io_cell", capped.subckts)
+        self.assertEqual(len(capped.depth_limited), 1)
+
+    def test_the_top_deck_is_never_skipped_or_made_opaque(self):
+        p = self.write("top.spf", self.TOP)
+        dk = deck.read([p], skip=[r"\.spf$"])
+        self.assertEqual(dk.skipped_files, [])
+        self.assertEqual(len(dk.elements), 5)
+
+
 class TestChecks(Harness):
     SUB = ".subckt io_cell VDD VSS PAD DIN\nR1 PAD DIN 1k\n.ends\n"
 
