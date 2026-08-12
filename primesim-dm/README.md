@@ -27,12 +27,28 @@ python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 
 ### 윈도우에서
 
-동일하게 동작합니다. 런처에 확장자가 없으니 `python` 을 앞에 붙여 실행하세요.
+먼저 파이썬이 있는지 확인합니다. `Win+R` → `cmd` 로 명령 프롬프트를 열고:
+
+```cmd
+py --version
+```
+
+`Python 3.x.x` 가 나오면 준비 끝입니다. `py` 가 없다고 하면 `python --version` 도 해보세요.
+둘 다 안 되면 python.org 에서 설치하되 **설치 첫 화면의 "Add python.exe to PATH" 를 체크**하세요.
+(`python` 이라고 쳤을 때 Microsoft Store 가 열리면 아직 설치가 안 된 상태입니다.)
+
+그 다음:
 
 ```cmd
 cd C:\tools\primesim-dm
-python -m unittest discover -s tests
-python primesim-dm lint C:\proj\sim\lpddr_write.sp
+py -m unittest discover -s tests
+py -m primesim_dm lint C:\proj\sim\lpddr_write.sp
+```
+
+다른 디렉토리에서 쓰려면 배치 래퍼를 쓰세요:
+
+```cmd
+C:\tools\primesim-dm\primesim-dm.bat lint C:\proj\sim\lpddr_write.sp
 ```
 
 - 읽기는 항상 UTF-8로 하고 깨지는 바이트는 대체 문자로 넘깁니다. 한국어 윈도우 기본
