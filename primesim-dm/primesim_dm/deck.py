@@ -170,7 +170,7 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
         if not os.path.isfile(path):
             deck.missing_includes.append(path)
             continue
-        with open(path, "r", errors="replace") as fh:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
         deck.files.append(path)
 

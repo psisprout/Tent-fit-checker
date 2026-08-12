@@ -192,6 +192,32 @@ class TestChecks(Harness):
         self.assertEqual([x for x in f if x.code == "floating-net"], [])
 
 
+class TestPortability(Harness):
+    """Reads must not depend on the machine's locale, writes must not depend
+    on its line-ending convention - decks get made on one box and run on
+    another."""
+
+    def test_cp949_bytes_do_not_crash_the_parser(self):
+        p = os.path.join(self.dir, "m.inc")
+        with open(p, "wb") as fh:
+            fh.write("* \uc0c1\ud0dc \uc8fc\uc11d\n".encode("cp949"))
+            fh.write(b".subckt io a b\nR1 a b 1k\n.ends\n")
+        d = self.write("d.sp", ".include 'm.inc'\nX1 x y io\nR9 x y 1k\n")
+        dk = deck.read([d])
+        self.assertIn("io", dk.subckts)
+        self.assertEqual([f.code for f in check.Checker(dk).run()
+                          if f.code == "undefined-subckt"], [])
+
+    def test_crlf_deck_parses(self):
+        p = os.path.join(self.dir, "d.sp")
+        with open(p, "wb") as fh:
+            fh.write(b".subckt io a b\r\nR1 a b 1k\r\n.ends\r\n"
+                     b"X1 x y io\r\nR9 x y 1k\r\n")
+        dk = deck.read([p])
+        self.assertEqual(sorted(e.name for e in dk.elements), ["R9", "X1"])
+        self.assertEqual(dk.unparsed, [])
+
+
 class TestValueParsing(unittest.TestCase):
     def test_suffixes(self):
         self.assertEqual(check.parse_value("0"), 0.0)

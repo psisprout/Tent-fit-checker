@@ -18,12 +18,30 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 105개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 107개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
 `examples/out/hbm_tx_rx.sp` 와 `.report.txt` 가 나오면 준비 완료입니다.
 `examples/models/*.inc` 는 동작 확인용 가짜 모델이므로 실제 모델로 교체해서 쓰면 됩니다.
+
+### 윈도우에서
+
+동일하게 동작합니다. 런처에 확장자가 없으니 `python` 을 앞에 붙여 실행하세요.
+
+```cmd
+cd C:\tools\primesim-dm
+python -m unittest discover -s tests
+python primesim-dm lint C:\proj\sim\lpddr_write.sp
+```
+
+- 읽기는 항상 UTF-8로 하고 깨지는 바이트는 대체 문자로 넘깁니다. 한국어 윈도우 기본
+  인코딩(cp949)으로 저장된 모델·config가 있어도 죽지 않고, 리눅스와 같은 결과가 나옵니다.
+- 쓰기는 항상 LF입니다. 윈도우에서 만든 덱을 리눅스 팜에서 그대로 돌릴 수 있습니다.
+- CRLF로 저장된 덱을 읽는 것도 됩니다.
+
+다만 **덱에 박히는 모델 경로는 만든 쪽 OS 기준**입니다. 윈도우에서 만들어 리눅스에서
+돌릴 거라면 `deck.output` 과 모델 경로를 상대경로로 쓰거나, 실행할 환경에서 생성하세요.
 
 ## 2. 기본 흐름
 

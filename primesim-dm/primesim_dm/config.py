@@ -287,7 +287,7 @@ def normalize(raw, base_dir="."):
 
 
 def _read_raw(path):
-    with open(path, "r") as fh:
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
         text = fh.read()
     try:
         raw = json.loads(strip_jsonc(text))

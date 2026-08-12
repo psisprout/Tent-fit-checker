@@ -373,7 +373,7 @@ def scan_files(paths, follow_includes=False, search_dirs=(),
         seen_set.add(p)
         seen.append(p)
         try:
-            with open(p, "r", errors="replace") as fh:
+            with open(p, "r", encoding="utf-8", errors="replace") as fh:
                 text = fh.read()
         except IOError as exc:
             warn("cannot read %s: %s" % (p, exc))

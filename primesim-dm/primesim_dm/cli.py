@@ -144,7 +144,7 @@ def cmd_init(args):
         return 0
     if os.path.exists(args.output) and not args.force:
         return _err("%s already exists (use --force to overwrite)" % args.output)
-    with open(args.output, "w") as fh:
+    with open(args.output, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     print("wrote %s (%d instance stub(s))" % (args.output, len(instances)))
     print("next: fill in naming.rules / connect, then "
@@ -184,10 +184,10 @@ def cmd_gen(args):
         parent = os.path.dirname(out_path)
         if parent and not os.path.isdir(parent):
             os.makedirs(parent)
-        with open(out_path, "w") as fh:
+        with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(deck)
         rep_path = out_path + ".report.txt"
-        with open(rep_path, "w") as fh:
+        with open(rep_path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(report)
         print("wrote %s" % out_path)
         print("wrote %s" % rep_path)
