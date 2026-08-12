@@ -81,6 +81,44 @@ v_en nd_en 0 1
         self.assertEqual(toks, ["b", "a", "b", "file='x.ibs'", "type=slow",
                                 "buffer=io", "power=off"])
 
+    def test_node_comment_table(self):
+        # S-parameter channel: ports are bare numbers, names are in comments
+        src = """* mem package, 4 ports
+*node	1			CA0_A_BGA1_G4_T1
+*node 2      CA0_A_DIE1_46_T1
+*node 3  VSS_BGA1_A1_T1
+*node 4  VSS_DIE1_01_T1
+.subckt mempkg_sp 1 2 3 4
+s1 1 2 3 4 mname=smodel
+.ends
+"""
+        sub = spice.parse_subckts(src, "pkg.inc")[0]
+        self.assertEqual(sub.ports, ["1", "2", "3", "4"])
+        self.assertEqual(sub.labels(),
+                         ["CA0_A_BGA1_G4_T1", "CA0_A_DIE1_46_T1",
+                          "VSS_BGA1_A1_T1", "VSS_DIE1_01_T1"])
+        self.assertEqual(sub.annotation_problems(), [])
+
+    def test_node_table_shorter_than_port_list(self):
+        src = ("*node 1 A_BGA\n*node 2 A_DIE\n"
+               ".subckt ch 1 2 3 4\n.ends\n")
+        sub = spice.parse_subckts(src, "pkg.inc")[0]
+        probs = " ".join(sub.annotation_problems())
+        self.assertIn("3-4", probs)
+        self.assertEqual(sub.label(2), "3")     # falls back to the token
+
+    def test_duplicate_node_name(self):
+        src = ("*node 1 A_BGA\n*node 2 A_BGA\n.subckt ch 1 2\n.ends\n")
+        probs = " ".join(spice.parse_subckts(src)[0].annotation_problems())
+        self.assertIn("both port 1 and 2", probs)
+
+    def test_node_tables_go_to_the_right_subckt(self):
+        src = ("*node 1 P_A\n.subckt one 1\n.ends\n"
+               "*node 1 Q_A\n.subckt two 1\n.ends\n")
+        one, two = spice.parse_subckts(src)
+        self.assertEqual(one.labels(), ["P_A"])
+        self.assertEqual(two.labels(), ["Q_A"])
+
     def test_bus_expand(self):
         self.assertEqual(spice.expand_bus("DQ[3:0]"),
                          ["DQ[3]", "DQ[2]", "DQ[1]", "DQ[0]"])

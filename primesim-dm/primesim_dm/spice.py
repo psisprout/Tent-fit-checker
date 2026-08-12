@@ -22,6 +22,12 @@ _INCLUDE = re.compile(
 _LIB = re.compile(
     r"^\s*\.lib\s+(?:'([^']+)'|\"([^\"]+)\"|(\S+))(?:\s+(\S+))?", re.I)
 
+# port-name tables that S-parameter exports put in header comments
+_NODE_ANNOT = [
+    re.compile(r"^\s*\*\s*node\s*(\d+)[\s:=]+(\S+)", re.I),
+    re.compile(r"^\s*\*\s*port\s*(\d+)[\s:=]+(\S+)", re.I),
+]
+
 # ``DQ[7:0]`` / ``DQ<7:0>`` / ``DQ(7:0)`` style bus declarations in a port list
 _BUS = re.compile(r"^(?P<base>.+?)[\[<\(](?P<hi>\d+)\s*:\s*(?P<lo>\d+)[\]>\)]$")
 
@@ -48,21 +54,75 @@ class Subckt(object):
         self.params = params          # dict of default parameters
         self.path = path              # file it was found in
         self.line = line              # 1-based line number of the .subckt
+        self.end_line = line          # line of the matching .ends
         self.depth = depth            # 0 = top level, >0 = nested
+        self.node_names = {}          # 1-based port index -> name from *node
 
     def __repr__(self):
         return "<Subckt %s (%d ports) %s:%d>" % (
             self.name, len(self.ports), self.path, self.line)
 
+    def label(self, index):
+        """Best available name for port ``index`` (0-based).
+
+        S-parameter channel models declare ports as bare numbers and carry the
+        real names in ``*node`` comments; everywhere else the port token is
+        already the name.
+        """
+        return self.node_names.get(index + 1, self.ports[index])
+
+    def labels(self):
+        return [self.label(i) for i in range(len(self.ports))]
+
+    def annotation_problems(self):
+        """Complaints about the ``*node`` table, if there is one."""
+        if not self.node_names:
+            return []
+        out = []
+        n = len(self.ports)
+        missing = [i for i in range(1, n + 1) if i not in self.node_names]
+        extra = sorted(i for i in self.node_names if i < 1 or i > n)
+        if missing:
+            out.append("%s: no *node comment for port index %s"
+                       % (self.name, _ranges(missing)))
+        if extra:
+            out.append("%s: *node comment for index %s but the subckt only "
+                       "has %d ports" % (self.name, _ranges(extra), n))
+        seen = {}
+        for idx, nm in sorted(self.node_names.items()):
+            if nm in seen:
+                out.append("%s: *node name %r used for both port %d and %d"
+                           % (self.name, nm, seen[nm], idx))
+            seen[nm] = idx
+        return out
+
     def to_dict(self):
         return {
             "name": self.name,
             "ports": list(self.ports),
+            "labels": self.labels(),
+            "node_names": dict((str(k), v)
+                               for k, v in sorted(self.node_names.items())),
             "params": dict(self.params),
             "path": self.path,
             "line": self.line,
             "depth": self.depth,
         }
+
+
+def _ranges(nums):
+    """[1,2,3,7] -> '1-3, 7'"""
+    nums = sorted(nums)
+    out = []
+    start = prev = nums[0]
+    for n in nums[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        out.append(str(start) if start == prev else "%d-%d" % (start, prev))
+        start = prev = n
+    out.append(str(start) if start == prev else "%d-%d" % (start, prev))
+    return ", ".join(out)
 
 
 def strip_comments(line):
@@ -162,6 +222,55 @@ def normalize_bus(name, style):
     return fmt.format(base=m.group("base"), idx=int(m.group("idx")))
 
 
+def parse_node_annotations(text):
+    """Collect ``*node <n> <name>`` header comments.
+
+    S-parameter channel models (mem package, board, RDL ...) declare their
+    ports as bare numbers::
+
+        *node   1    CA0_A_BGA1_G4_T1
+        *node   2    CA0_A_DIE1_46_T1
+        .subckt mempkg_sp 1 2 3 ... n
+
+    so the port list carries no meaning and this comment table is the only
+    thing that says which physical node each port is.  Returns a list of
+    ``(lineno, index, name)``.
+    """
+    out = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        if not raw.lstrip().startswith("*"):
+            continue
+        for rx in _NODE_ANNOT:
+            m = rx.match(raw)
+            if m:
+                out.append((n, int(m.group(1)), m.group(2)))
+                break
+    return out
+
+
+def _attach_annotations(found, annots):
+    """Give each annotation to the subckt it belongs to.
+
+    The table sits immediately above its ``.subckt`` (sometimes inside the
+    body), so an annotation belongs to the first subckt whose body ends at or
+    after it, as long as no earlier subckt already closed past that point.
+    """
+    if not annots or not found:
+        return
+    tops = [s for s in found if s.depth == 0] or found
+    tops = sorted(tops, key=lambda s: s.line)
+    for lineno, idx, name in annots:
+        owner = None
+        prev_end = 0
+        for s in tops:
+            if prev_end < lineno <= s.end_line:
+                owner = s
+                break
+            prev_end = s.end_line
+        if owner is not None:
+            owner.node_names[idx] = name
+
+
 def parse_subckts(text, path="<string>", expand_buses=False):
     """Return every ``.subckt`` found in ``text``."""
     found = []
@@ -191,11 +300,15 @@ def parse_subckts(text, path="<string>", expand_buses=False):
                     ports.extend(expand_bus(tok))
                 else:
                     ports.append(tok)
-            found.append(Subckt(name, ports, params, path, lineno, len(stack)))
-            stack.append(name)
+            sub = Subckt(name, ports, params, path, lineno, len(stack))
+            found.append(sub)
+            stack.append(sub)
         elif _ENDS.match(line):
             if stack:
-                stack.pop()
+                stack.pop().end_line = lineno
+    for sub in stack:                      # unterminated .subckt
+        sub.end_line = max(sub.end_line, lineno if found else sub.line)
+    _attach_annotations(found, parse_node_annotations(text))
     return found
 
 

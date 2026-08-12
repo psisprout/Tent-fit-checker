@@ -51,9 +51,16 @@ def cmd_scan(args):
         tag = "" if s.depth == 0 else "  (nested, depth %d)" % s.depth
         print("")
         print("%s  [%s:%d]%s" % (s.name, s.path, s.line, tag))
-        print("  ports (%d):" % len(s.ports))
-        for i, p in enumerate(s.ports):
-            print("    %3d  %s" % (i, p))
+        if s.node_names:
+            print("  ports (%d), names from *node comments:" % len(s.ports))
+            for i, p in enumerate(s.ports):
+                print("    %3d  %-6s  %s" % (i, p, s.label(i)))
+            for problem in s.annotation_problems():
+                print("    ! %s" % problem)
+        else:
+            print("  ports (%d):" % len(s.ports))
+            for i, p in enumerate(s.ports):
+                print("    %3d  %s" % (i, p))
         if s.params:
             print("  params: %s" % ", ".join(
                 "%s=%s" % kv for kv in sorted(s.params.items())))

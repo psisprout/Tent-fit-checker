@@ -71,9 +71,10 @@ def expand_template(tmpl, match, ctx):
 class Binding(object):
     """One resolved subckt port."""
 
-    def __init__(self, inst, port, index):
+    def __init__(self, inst, port, index, token=None):
         self.inst = inst
-        self.port = port
+        self.port = port             # label: *node name if there is one
+        self.token = token or port   # the raw token in the .subckt line
         self.index = index
         self.match_name = port
         self.net = None
@@ -265,7 +266,7 @@ class Resolver(object):
 
     def _resolve_port(self, inst, sub, port, index, inst_rules, explicit,
                       unused_rx, netlist):
-        b = Binding(inst["name"], port, index)
+        b = Binding(inst["name"], port, index, token=sub.ports[index])
         mport = self.match_name(port)
         b.match_name = mport
         ctx = {"port": mport, "raw_port": port, "inst": inst["name"],
@@ -331,9 +332,13 @@ class Resolver(object):
         nl = Netlist()
         for inst in self.cfg["instances"]:
             sub = self._lookup_subckt(inst)
-            # connect keys are matched against the same normalized port name
-            # the rules see, and case-insensitively (SPICE names are)
-            port_keys = set(self.match_name(p) for p in sub.ports)
+            # Rules and connect keys match the port *label*: normally the
+            # token in the .subckt line, but for an S-parameter channel that
+            # is a bare number, so the *node comment name is used instead.
+            labels = sub.labels()
+            for problem in sub.annotation_problems():
+                self.warn(problem)
+            port_keys = set(self.match_name(p) for p in labels)
             lower_keys = dict((k.lower(), k) for k in port_keys)
             explicit = {}
             for k, v in (inst.get("connect", {}) or {}).items():
@@ -351,9 +356,9 @@ class Resolver(object):
             unused_rx = [re.compile(p) for p in (inst.get("unused", []) or [])]
 
             bindings = []
-            for i, port in enumerate(sub.ports):
+            for i, label in enumerate(labels):
                 bindings.append(self._resolve_port(
-                    inst, sub, port, i, inst_rules, explicit, unused_rx, nl))
+                    inst, sub, label, i, inst_rules, explicit, unused_rx, nl))
             nl.instances.append((inst, sub, bindings))
 
         self._index_nets(nl)
