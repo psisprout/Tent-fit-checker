@@ -312,6 +312,75 @@ def parse_subckts(text, path="<string>", expand_buses=False):
     return found
 
 
+_LIB_DEF = re.compile(r"^\s*\.lib\s+(\S+)\s*$", re.I)
+_ENDL = re.compile(r"^\s*\.endl\b", re.I)
+
+
+def lib_sections(text):
+    """Names of the ``.lib <name>`` ... ``.endl`` sections defined in text."""
+    names = []
+    for raw in text.splitlines():
+        code = strip_comments(raw)
+        m = _LIB_DEF.match(code) if code else None
+        if m and m.group(1) not in names:
+            names.append(m.group(1))
+    return names
+
+
+def select_lib_section(text, section=None):
+    """Keep only the part of a library that ``section`` selects.
+
+    ``.lib 'corners.lib' tt`` activates the ``tt`` section and nothing else,
+    so reading the whole file pulls in every corner at once - the same
+    subckts and element names over and over. Lines outside the chosen
+    section are blanked rather than deleted, which keeps every line number
+    pointing where it did.
+    """
+    out = []
+    stack = []
+    want = section.lower() if section else None
+    for raw in text.splitlines():
+        code = strip_comments(raw)
+        if code:
+            m = _LIB_DEF.match(code)
+            if m:
+                stack.append(m.group(1))
+                out.append("")
+                continue
+            if _ENDL.match(code):
+                if stack:
+                    stack.pop()
+                out.append("")
+                continue
+        active = not stack or (want is not None and stack[0].lower() == want)
+        out.append(raw if active else "")
+    return "\n".join(out)
+
+
+def include_target(line):
+    """``(path, section)`` for a .include/.lib line, or None.
+
+    The section matters: it decides how much of the target file is live.
+    """
+    m = _INCLUDE.match(line)
+    if m:
+        raw = m.group(1) or m.group(2) or m.group(3)
+        return (raw, None) if raw else None
+    m = _LIB.match(line)
+    if not m:
+        return None
+    raw = m.group(1) or m.group(2) or m.group(3)
+    if not raw:
+        return None
+    quoted = bool(m.group(1) or m.group(2))
+    section = m.group(4)
+    if quoted or section:
+        return (raw, section)
+    if "/" in raw or os.sep in raw or os.path.splitext(raw)[1]:
+        return (raw, None)
+    return None                          # bare section call / definition
+
+
 def include_path(line):
     """The file a ``.include``/``.lib`` line points at, or None.
 
@@ -320,21 +389,8 @@ def include_path(line):
     be done by looking for a leading dot - every relative path starts with
     one.
     """
-    m = _INCLUDE.match(line)
-    if m:
-        return m.group(1) or m.group(2) or m.group(3) or None
-    m = _LIB.match(line)
-    if not m:
-        return None
-    raw = m.group(1) or m.group(2) or m.group(3)
-    if not raw:
-        return None
-    quoted = bool(m.group(1) or m.group(2))
-    if quoted or m.group(4):            # quoted, or followed by a section name
-        return raw
-    if "/" in raw or os.sep in raw or os.path.splitext(raw)[1]:
-        return raw
-    return None                          # bare section call
+    target = include_target(line)
+    return target[0] if target else None
 
 
 def _resolve_path(raw, base_dir, search_dirs):
@@ -361,16 +417,17 @@ def scan_files(paths, follow_includes=False, search_dirs=(),
     seen = []
     seen_set = set()
     out = []
-    queue = list(paths)
+    # entries are either a path or (path, .lib section)
+    queue = [e if isinstance(e, tuple) else (e, None) for e in paths]
     while queue:
-        p = queue.pop(0)
+        p, section = queue.pop(0)
         p = os.path.abspath(os.path.expandvars(os.path.expanduser(p)))
-        if p in seen_set:
+        if (p, section) in seen_set:
             continue
         if not os.path.isfile(p):
             warn("model file not found: %s" % p)
             continue
-        seen_set.add(p)
+        seen_set.add((p, section))
         seen.append(p)
         try:
             with open(p, "r", encoding="utf-8", errors="replace") as fh:
@@ -378,17 +435,20 @@ def scan_files(paths, follow_includes=False, search_dirs=(),
         except IOError as exc:
             warn("cannot read %s: %s" % (p, exc))
             continue
+        if section or lib_sections(text):
+            text = select_lib_section(text, section)
         out.extend(parse_subckts(text, p, expand_buses=expand_buses))
         if not follow_includes:
             continue
         base_dir = os.path.dirname(p)
         for _lineno, line in logical_lines(text):
-            raw = include_path(line)
-            if not raw:
+            found = include_target(line)
+            if not found:
                 continue
+            raw, sub_section = found
             resolved = _resolve_path(raw, base_dir, search_dirs)
             if resolved:
-                queue.append(resolved)
+                queue.append((resolved, sub_section))
             else:
                 warn("could not resolve include %r from %s" % (raw, p))
     return out, seen

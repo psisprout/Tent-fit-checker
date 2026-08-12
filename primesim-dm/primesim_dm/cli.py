@@ -25,7 +25,7 @@ def _warn(msg):
 
 
 def _load_models(cfg):
-    paths = [e["path"] for e in cfg["models"]["files"]]
+    paths = [(e["path"], e.get("section")) for e in cfg["models"]["files"]]
     subs, files = spice.scan_files(
         paths,
         follow_includes=cfg["models"]["follow_includes"],

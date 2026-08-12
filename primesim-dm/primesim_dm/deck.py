@@ -174,7 +174,9 @@ def _resolve(raw, dirs):
 def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
     """Parse one or more deck files into a :class:`Deck`."""
     deck = Deck()
-    queue = list(paths)
+    # a file can legitimately be read twice under two different .lib
+    # sections, so the queue and the seen-set are keyed on both
+    queue = [(p, None) for p in paths]
     seen = set()
     deck_dirs = [os.path.dirname(os.path.abspath(p)) for p in paths]
     deck.searched_dirs = []
@@ -183,16 +185,21 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
         return net.lower() if fold_case else net
 
     while queue:
-        path = os.path.abspath(queue.pop(0))
-        if path in seen:
+        path, section = queue.pop(0)
+        path = os.path.abspath(path)
+        if (path, section) in seen:
             continue
-        seen.add(path)
+        seen.add((path, section))
         if not os.path.isfile(path):
             deck.missing_includes.append(path)
             continue
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
-        deck.files.append(path)
+        if section or spice.lib_sections(text):
+            # only the selected .lib section is live; without one, the
+            # sections in the file are definitions nobody activated
+            text = spice.select_lib_section(text, section)
+        deck.files.append(path + (" [.lib %s]" % section if section else ""))
 
         for sub in spice.parse_subckts(text, path):
             deck.subckts.setdefault(sub.name.lower(), sub)
@@ -208,8 +215,9 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
                 continue
 
             if _DOT_INCLUDE.match(line) or _DOT_LIB.match(line):
-                raw = spice.include_path(line)
-                if raw:
+                found = spice.include_target(line)
+                if found:
+                    raw, sub_section = found
                     dirs = resolve_dirs(base_dir, deck_dirs, search_dirs)
                     for d in dirs:
                         if d not in deck.searched_dirs:
@@ -220,7 +228,7 @@ def read(paths, follow_includes=True, search_dirs=(), fold_case=True):
                             "%s (from %s:%d)" % (raw, os.path.basename(path),
                                                  lineno))
                     elif follow_includes:
-                        queue.append(target)
+                        queue.append((target, sub_section))
                 continue
 
             if depth:                      # only the top level is checked

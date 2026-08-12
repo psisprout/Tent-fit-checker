@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 111개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 117개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -112,6 +112,23 @@ python3 -m primesim_dm lint /proj/sim/lpddr_write.sp
 4. `--search-dir` 로 준 경로들 (여러 번 가능)
 
 환경변수(`$MODELS/...`)도 전개됩니다. 그래도 못 찾으면 시도한 디렉토리를 에러에 찍어줍니다.
+
+### `.lib` 는 지정한 섹션만 읽습니다
+
+`.lib 'corners.lib' tt` 는 `tt` 섹션만 활성화합니다. 파일 전체를 읽으면 코너별 섹션이
+전부 들어와서 같은 subckt·같은 소자 이름이 코너 수만큼 중복됩니다.
+
+```
+files    : 2
+           /proj/sim/top.sp
+           /proj/DB/corners.lib [.lib tt]      ← 어느 섹션을 읽었는지 표시
+subckts  : 1 definition(s) available            ← 3개 코너였어도 1개
+```
+
+- `.lib <name>` ~ `.endl` 밖에 있는 내용은 섹션과 무관하게 항상 읽습니다.
+- 같은 파일을 다른 섹션으로 두 번 불러도 각각 읽습니다.
+- `.include` 로 부르면 어떤 섹션도 활성화되지 않습니다 (섹션 정의만 있는 상태).
+- 비활성 구간은 빈 줄로 치환해서 **줄 번호가 그대로 유지**됩니다.
 
 ### 못 읽은 파일이 있으면 연결성 검사를 건너뜁니다
 

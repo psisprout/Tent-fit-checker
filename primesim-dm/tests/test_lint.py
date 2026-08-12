@@ -167,6 +167,78 @@ class TestIncompleteNetlist(Harness):
         self.assertNotIn("checks-skipped", codes)
 
 
+CORNERS = """\
+.lib tt
+.subckt ch a b
+Rtt a b 0.10
+.ends
+Xtt_only p q ch
+.endl tt
+.lib ff
+.subckt ch a b
+Rff a b 0.08
+.ends
+Xff_only p q ch
+.endl ff
+"""
+
+
+class TestLibSections(Harness):
+    """`.lib file tt` activates the tt section only. Reading the whole file
+    pulls every corner in at once, which shows up as the same subckt and the
+    same element names defined over and over."""
+
+    def test_only_the_named_section_is_read(self):
+        self.write("corners.lib", CORNERS)
+        p = self.write("top.sp", ".lib 'corners.lib' tt\n"
+                                 "X1 n1 n2 ch\nR9 n1 n2 1k\n")
+        dk = deck.read([p])
+        self.assertEqual(len(dk.subckts), 1)
+        names = sorted(e.name for e in dk.elements)
+        self.assertIn("Xtt_only", names)
+        self.assertNotIn("Xff_only", names)
+        self.assertEqual([f.code for f in check.Checker(dk).run()
+                          if f.code == "duplicate-name"], [])
+
+    def test_other_section_gives_the_other_content(self):
+        self.write("corners.lib", CORNERS)
+        p = self.write("top.sp", ".lib 'corners.lib' ff\nR9 n1 n2 1k\n")
+        dk = deck.read([p])
+        self.assertIn("Xff_only", [e.name for e in dk.elements])
+        self.assertNotIn("Xtt_only", [e.name for e in dk.elements])
+
+    def test_same_file_twice_under_two_sections(self):
+        self.write("corners.lib", CORNERS)
+        p = self.write("top.sp", ".lib 'corners.lib' tt\n"
+                                 ".lib 'corners.lib' ff\nR9 n1 n2 1k\n")
+        dk = deck.read([p])
+        names = [e.name for e in dk.elements]
+        self.assertIn("Xtt_only", names)
+        self.assertIn("Xff_only", names)
+
+    def test_plain_include_activates_no_section(self):
+        self.write("corners.lib", CORNERS)
+        p = self.write("top.sp", ".include 'corners.lib'\nR9 n1 n2 1k\n")
+        dk = deck.read([p])
+        self.assertEqual(dk.subckts, {})
+        self.assertEqual([e.name for e in dk.elements], ["R9"])
+
+    def test_content_outside_any_section_is_always_read(self):
+        self.write("mixed.lib", ".subckt always a b\nR1 a b 1k\n.ends\n"
+                                + CORNERS)
+        p = self.write("top.sp", ".lib 'mixed.lib' tt\nR9 n1 n2 1k\n")
+        dk = deck.read([p])
+        self.assertIn("always", dk.subckts)
+        self.assertIn("ch", dk.subckts)
+
+    def test_line_numbers_survive_the_blanking(self):
+        self.write("corners.lib", CORNERS)
+        p = self.write("top.sp", ".lib 'corners.lib' ff\nR9 n1 n2 1k\n")
+        dk = deck.read([p])
+        xff = [e for e in dk.elements if e.name == "Xff_only"][0]
+        self.assertEqual(xff.line, 11)      # its real line in corners.lib
+
+
 class TestChecks(Harness):
     SUB = ".subckt io_cell VDD VSS PAD DIN\nR1 PAD DIN 1k\n.ends\n"
 
