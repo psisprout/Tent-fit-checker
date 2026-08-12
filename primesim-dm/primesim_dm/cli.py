@@ -223,7 +223,9 @@ def cmd_lint(args):
                                 keep_nets=args.keep_net or [])
     findings = checker.run()
     counts = checker.counts()
-    sys.stdout.write(check_mod.render(dk, findings, counts, verbose=args.verbose))
+    sys.stdout.write(check_mod.render(
+        dk, findings, counts, verbose=args.verbose,
+        limit=0 if args.all else args.limit, summary_only=args.summary))
     if counts[check_mod.SEV_ERROR]:
         return 1
     if args.strict and counts[check_mod.SEV_WARN]:
@@ -283,6 +285,12 @@ def build_parser():
                         "as one node (default 1e-6)")
     s.add_argument("-v", "--verbose", action="store_true",
                    help="also show info notes")
+    s.add_argument("--summary", action="store_true",
+                   help="counts per finding kind only, no individual lines")
+    s.add_argument("--limit", type=int, default=10,
+                   help="max findings to list per kind (default 10)")
+    s.add_argument("--all", action="store_true",
+                   help="list every finding, no per-kind cap")
     s.add_argument("--strict", action="store_true",
                    help="exit non-zero on warnings too")
     s.set_defaults(func=cmd_lint)

@@ -189,7 +189,18 @@ class Checker(object):
         return out
 
 
-def render(deck, findings, counts, verbose=False):
+def summarize(findings):
+    """code -> (severity, count), most severe and most numerous first."""
+    tally = {}
+    for f in findings:
+        key = (f.severity, f.code)
+        tally[key] = tally.get(key, 0) + 1
+    rows = [(sev, code, n) for (sev, code), n in tally.items()]
+    rows.sort(key=lambda r: (_ORDER[r[0]], -r[2], r[1]))
+    return rows
+
+
+def render(deck, findings, counts, verbose=False, limit=10, summary_only=False):
     out = []
     out.append("primesim-dm-setup deck check")
     out.append("=" * 66)
@@ -206,12 +217,33 @@ def render(deck, findings, counts, verbose=False):
 
     shown = findings if verbose else [f for f in findings
                                       if f.severity != SEV_INFO]
-    if not shown:
+
+    rows = summarize(shown)
+    if rows:
+        out.append("by kind:")
+        for sev, code, n in rows:
+            out.append("  %-5s %-20s %5d" % (sev.upper(), code, n))
+        out.append("")
+
+    if summary_only:
+        pass
+    elif not shown:
         out.append("no problems found"
                    + ("" if verbose else " (re-run with -v for info notes)"))
     else:
+        # cap each kind: one wrong assumption can produce hundreds of
+        # identical findings, and that buries the ones that differ
+        seen = {}
+        hidden = {}
         for f in shown:
+            seen[f.code] = seen.get(f.code, 0) + 1
+            if limit and seen[f.code] > limit:
+                hidden[f.code] = hidden.get(f.code, 0) + 1
+                continue
             out.append(f.line())
+        for code in sorted(hidden):
+            out.append("      ... and %d more %s (use --all to list every one)"
+                       % (hidden[code], code))
     out.append("")
     out.append("%d error(s), %d warning(s), %d note(s)"
                % (counts[SEV_ERROR], counts[SEV_WARN], counts[SEV_INFO]))
