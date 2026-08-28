@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 
 from . import check as check_mod
@@ -252,6 +253,56 @@ def cmd_lint(args):
     return 0
 
 
+# ---------------------------------------------------------------- terminate
+def _read_deck(args):
+    opaque = args.opaque or None
+    if args.opaque and not args.no_default_opaque:
+        opaque = list(deck_mod.DEFAULT_OPAQUE) + args.opaque
+    elif args.no_default_opaque:
+        opaque = args.opaque or []
+    return deck_mod.read(args.deck,
+                         follow_includes=not args.no_includes,
+                         search_dirs=args.search_dir or [],
+                         opaque=opaque, skip=args.skip or [],
+                         max_depth=args.max_depth)
+
+
+def cmd_terminate(args):
+    dk = _read_deck(args)
+    if not dk.files:
+        return _err("could not read any of: %s" % ", ".join(args.deck))
+    if dk.missing_includes and not args.force:
+        return _err(
+            "%d include(s) could not be read, so nets that belong to them "
+            "look one-sided. Terminating those would paper over the real "
+            "problem - fix the includes, or pass --force if you mean it."
+            % len(dk.missing_includes))
+
+    checker = check_mod.Checker(dk, keep_nets=args.keep_net or [])
+    floating = checker.floating_nets()
+    if args.exclude:
+        drop = [re.compile(p) for p in args.exclude]
+        floating = [f for f in floating
+                    if not any(rx.search(f[0]) for rx in drop)]
+
+    text = check_mod.render_terminations(
+        dk, floating, kind="none" if args.nodes_only else args.type,
+        value=args.value, value2=args.value2, to=args.to,
+        prefix=args.prefix, source=os.path.abspath(args.deck[0]))
+
+    if args.output:
+        parent = os.path.dirname(os.path.abspath(args.output))
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent)
+        with open(args.output, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        print("wrote %s (%d node(s))" % (args.output, len(floating)))
+        print("review it, then add:  .include '%s'" % args.output)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
 # ---------------------------------------------------------------- main
 def build_parser():
     p = argparse.ArgumentParser(
@@ -330,6 +381,40 @@ def build_parser():
     s.add_argument("--strict", action="store_true",
                    help="exit non-zero on warnings too")
     s.set_defaults(func=cmd_lint)
+
+    s = sub.add_parser("terminate",
+                       help="emit R/C termination lines for the nodes "
+                            "nothing else connects to")
+    s.add_argument("deck", nargs="+")
+    s.add_argument("-o", "--output", metavar="FILE",
+                   help="write the .inc here instead of stdout")
+    s.add_argument("--type", choices=("rload", "cload", "rc"),
+                   default="rload",
+                   help="rload: a resistor, cload: a capacitor, rc: both "
+                        "(default rload)")
+    s.add_argument("--value", default="1T",
+                   help="resistance for rload/rc (default 1T)")
+    s.add_argument("--value2", default="1f",
+                   help="capacitance for cload/rc (default 1f)")
+    s.add_argument("--to", default="0",
+                   help="net the termination returns to (default 0)")
+    s.add_argument("--prefix", default="Rterm_",
+                   help="element name prefix (default Rterm_)")
+    s.add_argument("--nodes-only", action="store_true",
+                   help="just list the nodes, generate no elements")
+    s.add_argument("--exclude", action="append", metavar="REGEX",
+                   help="leave nets matching this alone (repeatable)")
+    s.add_argument("--keep-net", action="append", metavar="REGEX",
+                   help="nets to exempt from the floating check (repeatable)")
+    s.add_argument("--no-includes", action="store_true")
+    s.add_argument("--search-dir", action="append")
+    s.add_argument("--opaque", action="append", metavar="REGEX")
+    s.add_argument("--no-default-opaque", action="store_true")
+    s.add_argument("--skip", action="append", metavar="REGEX")
+    s.add_argument("--max-depth", type=int, metavar="N")
+    s.add_argument("--force", action="store_true",
+                   help="proceed even though includes are missing")
+    s.set_defaults(func=cmd_terminate)
 
     s = sub.add_parser("check", help="print the connectivity report only")
     s.add_argument("config")

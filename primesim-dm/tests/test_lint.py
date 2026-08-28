@@ -453,3 +453,82 @@ class TestValueParsing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTerminationOutput(Harness):
+    """Emitting terminations for one-sided nets - the nets a deck forgot, or
+    the pins it genuinely does not use."""
+
+    SUB = ".subckt io VDD VSS PAD DIN EN\nR1 PAD DIN 1k\n.ends\n"
+    DECK = (SUB + "XIO vdd vss pad din en io\nXRX vdd vss pad rx en2 io\n"
+            "Vd vdd 0 DC 1.1\nVs vss 0 DC 0\nVi din 0 DC 0\n"
+            "Ve en 0 DC 1.1\n")
+
+    def floating_of(self, text=None, **kw):
+        dk = deck.read([self.write("d.sp", text or self.DECK)])
+        return dk, check.Checker(dk, **kw).floating_nets()
+
+    def test_finds_the_one_sided_nets(self):
+        _dk, floating = self.floating_of()
+        self.assertEqual(sorted(n for n, _e, _i in floating), ["en2", "rx"])
+
+    def test_resistor_lines(self):
+        dk, floating = self.floating_of()
+        text = check.render_terminations(dk, floating, kind="rload",
+                                         value="1T", to="0")
+        lines = [l for l in text.splitlines() if l.startswith("Rterm_")]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("1T", lines[0])
+        self.assertTrue(lines[0].split()[2] == "0")
+
+    def test_capacitor_lines(self):
+        dk, floating = self.floating_of()
+        text = check.render_terminations(dk, floating, kind="cload",
+                                         value2="5f", to="vss",
+                                         prefix="Rterm_")
+        lines = [l for l in text.splitlines() if l.startswith("Cterm_")]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("5f", lines[0])
+
+    def test_rc_emits_both(self):
+        dk, floating = self.floating_of()
+        text = check.render_terminations(dk, floating, kind="rc")
+        self.assertEqual(len([l for l in text.splitlines()
+                              if l.startswith("Rterm_")]), 2)
+        self.assertEqual(len([l for l in text.splitlines()
+                              if l.startswith("Cterm_")]), 2)
+
+    def test_nodes_only_generates_no_elements(self):
+        dk, floating = self.floating_of()
+        text = check.render_terminations(dk, floating, kind="none")
+        self.assertEqual([l for l in text.splitlines()
+                          if not l.startswith("*")], [])
+        self.assertIn("rx", text)
+        self.assertIn("en2", text)
+
+    def test_every_line_names_its_port(self):
+        dk, floating = self.floating_of()
+        text = check.render_terminations(dk, floating)
+        for line in text.splitlines():
+            if line.startswith("Rterm_"):
+                self.assertIn("$", line)
+                self.assertIn("port", line)
+
+    def test_generated_names_avoid_existing_elements(self):
+        text = self.DECK + "Rterm_1 a b 1k\nRterm_2 b c 1k\nRterm_3 c a 1k\n"
+        dk, floating = self.floating_of(text)
+        out = check.render_terminations(dk, floating)
+        made = [l.split()[0].lower() for l in out.splitlines()
+                if l.startswith("Rterm_")]
+        existing = set(e.name.lower() for e in dk.elements)
+        self.assertEqual([m for m in made if m in existing], [])
+
+    def test_keep_net_removes_it_from_the_list(self):
+        _dk, floating = self.floating_of(keep_nets=["^en2$"])
+        self.assertEqual([n for n, _e, _i in floating], ["rx"])
+
+    def test_nothing_to_do_is_not_an_error(self):
+        dk, floating = self.floating_of("R1 a b 1k\nR2 b a 1k\n")
+        self.assertEqual(floating, [])
+        self.assertIn("nothing to terminate",
+                      check.render_terminations(dk, floating))

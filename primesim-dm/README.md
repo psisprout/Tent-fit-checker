@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 128개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 137개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -88,6 +88,7 @@ python3 -m primesim_dm check my_deck.jsonc
 | `gen`   | config → 덱 `.sp` + `.sp.report.txt` |
 | `check` | 덱은 안 쓰고 결선 리포트만 출력 (룰 튜닝용) |
 | `lint`  | **이미 있는 덱(.sp)을 읽어서 구조·연결성 검사.** config 불필요 |
+| `terminate` | **뜬 노드를 뽑아서 R/C 터미네이션 `.inc` 생성.** config 불필요 |
 
 `gen`/`check` 에 `--strict` 를 주면 경고가 하나라도 있을 때 exit code 1 → 회귀 스크립트에 물리기 좋습니다.
 
@@ -233,6 +234,56 @@ INFO  merged-net         ball_dq0 and ball_dq1 are one node (Rshort = 0 ohm)
 "이 검사 결과가 덱의 몇 %를 봤는지" 모르면 통과했다는 말에 의미가 없어서입니다.
 
 net 이름은 SPICE 규칙대로 대소문자를 구분하지 않습니다 (`PAD_DQ0` = `pad_dq0`).
+
+## 2-2. `terminate` — 뜬 노드에 터미네이션 달기
+
+한쪽만 연결된 노드를 찾아 R/C 터미네이션 줄을 만들어 줍니다. `lint` 와 같은
+옵션(`--search-dir` / `--skip` / `--opaque` / `--max-depth` / `--keep-net`)을 그대로 씁니다.
+
+```bash
+primesim-dm terminate deck.sp -o term.inc
+```
+
+```spice
+*==========================================================================
+* termination for 8 node(s) nothing else connects to
+* source: /proj/sim/deck.sp
+*
+* REVIEW BEFORE USING. A one-sided net is just as often a
+* connection someone forgot as a pin nobody uses; the port
+* each line came from is noted so you can tell them apart.
+*==========================================================================
+Rterm_1   en_rx      0   1T   $ XRX port 4 (deck.sp:5)
+Rterm_2   odt_en     0   1T   $ XIO port 5 (deck.sp:4)
+```
+
+**덱을 고치지 않고 별도 `.inc` 로 뽑습니다.** 한쪽만 붙은 net은 안 쓰는 핀일 수도,
+누가 빠뜨린 결선일 수도 있는데 도구는 그 둘을 구분하지 못합니다. 그래서 줄마다
+**어느 인스턴스의 몇 번 포트에서 나왔는지** 적어두니, 보고 판단한 뒤 덱에
+`.include 'term.inc'` 를 넣으시면 됩니다.
+
+| 옵션 | 기본 | 설명 |
+|---|---|---|
+| `--type rload\|cload\|rc` | `rload` | 저항 / 커패시터 / 둘 다 |
+| `--value` | `1T` | 저항값 |
+| `--value2` | `1f` | 커패시턴스 |
+| `--to` | `0` | 터미네이션이 돌아갈 net |
+| `--prefix` | `Rterm_` | 소자 이름 접두사 |
+| `--exclude REGEX` | | 이 net은 건드리지 않음 (반복 가능) |
+| `--nodes-only` | | **소자 안 만들고 노드 목록만** 출력 |
+
+```bash
+# 커패시터로, vss 기준, 테스트핀은 제외
+primesim-dm terminate deck.sp --type cload --value2 5f --to vss --exclude '^tm_'
+
+# 일단 목록만 보고 직접 판단
+primesim-dm terminate deck.sp --nodes-only
+```
+
+생성되는 소자 이름은 덱에 이미 있는 이름과 겹치지 않게 번호를 건너뜁니다.
+
+**읽지 못한 include가 있으면 거부합니다.** 그 파일 안의 소자가 빠져서 뜬 것처럼 보이는
+net까지 터미네이션하면 진짜 문제를 덮어버리기 때문입니다. `--force` 로 넘길 수는 있습니다.
 
 ## 3. 결선 규칙 — 우선순위
 
