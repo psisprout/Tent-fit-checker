@@ -1,0 +1,180 @@
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from primesim_dm import spice
+
+
+class TestLines(unittest.TestCase):
+    def test_strip_comments(self):
+        self.assertEqual(spice.strip_comments("* a comment"), "")
+        self.assertEqual(spice.strip_comments("R1 a b 1k $ load"), "R1 a b 1k")
+        self.assertEqual(spice.strip_comments("  R1 a b 1k  "), "  R1 a b 1k")
+
+    def test_continuation(self):
+        text = ".subckt foo a b\n+ c d\n* note\nR1 a b 1k\n"
+        got = list(spice.logical_lines(text))
+        self.assertEqual(got[0], (1, ".subckt foo a b  c d"))
+        self.assertEqual(got[1][1], "R1 a b 1k")
+
+    def test_wrap(self):
+        toks = ["X1"] + ["net%02d" % i for i in range(20)] + ["sub"]
+        lines = spice.wrap(toks, width=40)
+        self.assertTrue(len(lines) > 1)
+        self.assertTrue(all(l.startswith("+ ") for l in lines[1:]))
+        rebuilt = " ".join(lines[:1] + [l[2:] for l in lines[1:]]).split()
+        self.assertEqual(rebuilt, toks)
+
+
+class TestIncludePath(unittest.TestCase):
+    """A relative path starts with a dot, so 'starts with .' cannot be the
+    test for whether a .lib line names a file."""
+
+    def test_relative_include(self):
+        self.assertEqual(spice.include_path(".include '../models/a.inc'"),
+                         "../models/a.inc")
+        self.assertEqual(spice.include_path(".include ./b.inc"), "./b.inc")
+        self.assertEqual(spice.include_path(".inc '../../c.inc'"), "../../c.inc")
+
+    def test_absolute_and_plain(self):
+        self.assertEqual(spice.include_path(".include '/proj/m.inc'"),
+                         "/proj/m.inc")
+        self.assertEqual(spice.include_path(".include m.inc"), "m.inc")
+
+    def test_lib_with_section_names_a_file(self):
+        self.assertEqual(spice.include_path(".lib '../c.lib' tt"), "../c.lib")
+        self.assertEqual(spice.include_path(".lib ../c.lib tt"), "../c.lib")
+
+    def test_bare_lib_section_call_is_not_a_file(self):
+        self.assertIsNone(spice.include_path(".lib tt"))
+        self.assertIsNone(spice.include_path(".lib ff_hot"))
+
+    def test_quoted_lib_without_section_is_a_file(self):
+        self.assertEqual(spice.include_path(".lib '../corners.lib'"),
+                         "../corners.lib")
+
+    def test_other_lines(self):
+        self.assertIsNone(spice.include_path("R1 a b 1k"))
+        self.assertIsNone(spice.include_path(".temp 25"))
+
+
+class TestSubckt(unittest.TestCase):
+    SRC = """\
+* header
+.subckt amp VDD VSS IN OUT
++ EN TM_A
++ param: gain=2 cl=1f
+R1 IN OUT 1k
+.ends amp
+
+.SUBCKT wrap (A B)
+XI A B amp
+.ends
+"""
+
+    def test_parse(self):
+        subs = spice.parse_subckts(self.SRC, "m.inc")
+        self.assertEqual([s.name for s in subs], ["amp", "wrap"])
+        amp = subs[0]
+        self.assertEqual(amp.ports, ["VDD", "VSS", "IN", "OUT", "EN", "TM_A"])
+        self.assertEqual(amp.params, {"gain": "2", "cl": "1f"})
+        self.assertEqual(amp.line, 2)
+        self.assertEqual(subs[1].ports, ["A", "B"])
+
+    def test_spaced_equals(self):
+        subs = spice.parse_subckts(".subckt f a b w = 1u\n.ends\n")
+        self.assertEqual(subs[0].ports, ["a", "b"])
+        self.assertEqual(subs[0].params, {"w": "1u"})
+
+    def test_ibis_wrapper(self):
+        # IBIS buffers arrive wrapped in a subckt: ports on the continuation
+        # line, and the b-element carries params spaced every which way
+        src = """.subckt DQ_IBIS
++ nd_in nd_out nd_pu nd_pd
+b nd_pu nd_pd nd_out nd_in nd_en nd_out_of_in
++file = '.ibs'
++ model = '' type =slow buffer= input_output
++power = off
+v_en nd_en 0 1
+.ends
+"""
+        subs = spice.parse_subckts(src, "ibis.inc")
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0].name, "DQ_IBIS")
+        self.assertEqual(subs[0].ports,
+                         ["nd_in", "nd_out", "nd_pu", "nd_pd"])
+        self.assertEqual(subs[0].params, {})
+
+    def test_equals_spacing_variants(self):
+        toks = spice._tokenize("b a b file = 'x.ibs' type =slow buffer= io "
+                               "power=off")
+        self.assertEqual(toks, ["b", "a", "b", "file='x.ibs'", "type=slow",
+                                "buffer=io", "power=off"])
+
+    def test_node_comment_table(self):
+        # S-parameter channel: ports are bare numbers, names are in comments
+        src = """* mem package, 4 ports
+*node	1			CA0_A_BGA1_G4_T1
+*node 2      CA0_A_DIE1_46_T1
+*node 3  VSS_BGA1_A1_T1
+*node 4  VSS_DIE1_01_T1
+.subckt mempkg_sp 1 2 3 4
+s1 1 2 3 4 mname=smodel
+.ends
+"""
+        sub = spice.parse_subckts(src, "pkg.inc")[0]
+        self.assertEqual(sub.ports, ["1", "2", "3", "4"])
+        self.assertEqual(sub.labels(),
+                         ["CA0_A_BGA1_G4_T1", "CA0_A_DIE1_46_T1",
+                          "VSS_BGA1_A1_T1", "VSS_DIE1_01_T1"])
+        self.assertEqual(sub.annotation_problems(), [])
+
+    def test_node_table_shorter_than_port_list(self):
+        src = ("*node 1 A_BGA\n*node 2 A_DIE\n"
+               ".subckt ch 1 2 3 4\n.ends\n")
+        sub = spice.parse_subckts(src, "pkg.inc")[0]
+        probs = " ".join(sub.annotation_problems())
+        self.assertIn("3-4", probs)
+        self.assertEqual(sub.label(2), "3")     # falls back to the token
+
+    def test_duplicate_node_name(self):
+        src = ("*node 1 A_BGA\n*node 2 A_BGA\n.subckt ch 1 2\n.ends\n")
+        probs = " ".join(spice.parse_subckts(src)[0].annotation_problems())
+        self.assertIn("both port 1 and 2", probs)
+
+    def test_node_tables_go_to_the_right_subckt(self):
+        src = ("*node 1 P_A\n.subckt one 1\n.ends\n"
+               "*node 1 Q_A\n.subckt two 1\n.ends\n")
+        one, two = spice.parse_subckts(src)
+        self.assertEqual(one.labels(), ["P_A"])
+        self.assertEqual(two.labels(), ["Q_A"])
+
+    def test_bus_expand(self):
+        self.assertEqual(spice.expand_bus("DQ[3:0]"),
+                         ["DQ[3]", "DQ[2]", "DQ[1]", "DQ[0]"])
+        self.assertEqual(spice.expand_bus("A<0:2>"), ["A<0>", "A<1>", "A<2>"])
+        self.assertEqual(spice.expand_bus("CLK"), ["CLK"])
+
+    def test_bus_expand_in_subckt(self):
+        subs = spice.parse_subckts(".subckt f DQ[1:0] VSS\n.ends\n",
+                                   expand_buses=True)
+        self.assertEqual(subs[0].ports, ["DQ[1]", "DQ[0]", "VSS"])
+
+    def test_normalize_bus(self):
+        self.assertEqual(spice.normalize_bus("DQ[3]", "angle"), "DQ<3>")
+        self.assertEqual(spice.normalize_bus("DQ<3>", "bracket"), "DQ[3]")
+        self.assertEqual(spice.normalize_bus("DQ(03)", "underscore"), "DQ_3")
+        self.assertEqual(spice.normalize_bus("CLK", "angle"), "CLK")
+        self.assertEqual(spice.normalize_bus("DQ[3]", "keep"), "DQ[3]")
+
+    def test_nested_depth(self):
+        src = ".subckt outer a\n.subckt inner b\n.ends\n.ends\n"
+        subs = spice.parse_subckts(src)
+        self.assertEqual([(s.name, s.depth) for s in subs],
+                         [("outer", 0), ("inner", 1)])
+
+
+if __name__ == "__main__":
+    unittest.main()

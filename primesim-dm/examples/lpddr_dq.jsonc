@@ -1,0 +1,85 @@
+// ---------------------------------------------------------------------------
+// LPDDR DQ byte lane: two IO cells face to face through a package channel.
+// Shows `extends`, bus-declaration expansion (DQ[7:0]) and per-instance rules.
+//   python3 -m primesim_dm gen examples/lpddr_dq.jsonc
+// ---------------------------------------------------------------------------
+{
+  "extends": "base_common.jsonc",
+
+  "deck": {
+    "title": "LPDDR DQ byte lane : controller IO <-> package <-> dram IO",
+    "output": "out/lpddr_dq.sp"
+  },
+
+  "models": {
+    "files": ["models/lpddr_io.inc"],
+    "expand_buses": true      // DQ[7:0] in the .subckt line -> 8 single bits
+  },
+
+  "supplies": [
+    { "net": "vdd2", "value": 1.8 },
+    { "net": "vddq", "value": 1.1 },
+    { "net": "vss",  "value": 0 }
+  ],
+
+  "instances": [
+    {
+      "name": "XIO_CTRL",
+      "subckt": "lpddr_dq_io",
+      "comment": "controller side driver",
+      "params": { "drv": 34, "odt": 40 },
+      "rules": [
+        { "match": "^DQ<(\\d+)>$",       "net": "ctrl_pad<{1}>" },
+        { "match": "^TX_DATA<(\\d+)>$",  "net": "tx<{1}>" },
+        { "match": "^RX_DATA<(\\d+)>$",  "net": "ctrl_rx<{1}>" },
+        { "match": "^DQS_(T|C)$",        "net": "dqs_{1|lower}" }
+      ],
+      "connect": { "VREF_DQ": "vref_dq", "DMI": "dmi" },
+      "unused": ["^ODT_EN<", "^DRV_STR<"]
+    },
+    {
+      "name": "XPKG",
+      "subckt": "lpddr_pkg_ch",
+      "comment": "package trace, 25ps",
+      "params": { "zo": 45, "td": "25p" },
+      "rules": [
+        { "match": "^IN<(\\d+)>$",  "net": "ctrl_pad<{1}>" },
+        { "match": "^OUT<(\\d+)>$", "net": "dram_pad<{1}>" }
+      ]
+    },
+    {
+      "name": "XIO_DRAM",
+      "subckt": "lpddr_dq_io",
+      "comment": "DRAM side receiver, TX disabled",
+      "params": { "drv": 34, "odt": 40 },
+      "rules": [
+        { "match": "^DQ<(\\d+)>$",      "net": "dram_pad<{1}>" },
+        { "match": "^RX_DATA<(\\d+)>$", "net": "dram_rx<{1}>" },
+        // the DRAM side is receiving, so its own TX inputs are held low
+        { "match": "^TX_DATA<(\\d+)>$", "action": "terminate", "type": "tie", "to": "vss" },
+        { "match": "^DQS_(T|C)$",       "net": "dqs_{1|lower}" }
+      ],
+      "connect": { "VREF_DQ": "vref_dq", "DMI": "dmi" },
+      "unused": ["^ODT_EN<", "^DRV_STR<"]
+    }
+  ],
+
+  "stimulus": [
+    "Vvref vref_dq 0 DC 0.55",
+    "Vdmi  dmi     0 DC 0",
+    "Vdqst dqs_t 0 PULSE 0 1.1 0 15p 15p 235p 500p",
+    "Vdqsc dqs_c 0 PULSE 1.1 0 0 15p 15p 235p 500p",
+    "Vtx0 tx<0> 0 PULSE 0 1.1 0 15p 15p 235p 500p",
+    "Vtx1 tx<1> 0 PULSE 1.1 0 0 15p 15p 235p 500p",
+    "Vtx2 tx<2> 0 PULSE 0 1.1 0 15p 15p 485p 1000p",
+    "Vtx3 tx<3> 0 PULSE 1.1 0 0 15p 15p 485p 1000p",
+    "Vtx4 tx<4> 0 DC 1.1",
+    "Vtx5 tx<5> 0 DC 0",
+    "Vtx6 tx<6> 0 DC 1.1",
+    "Vtx7 tx<7> 0 DC 0"
+  ],
+
+  "analysis": { "tran": { "step": "1p", "stop": "10n" } },
+  "probes": ["v(ctrl_pad<0>) v(dram_pad<0>) v(dram_rx<0>)"],
+  "measures": [".meas tran eye_pp pp v(dram_pad<0>) from=1n to=10n"]
+}

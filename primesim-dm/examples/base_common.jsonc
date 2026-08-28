@@ -1,0 +1,35 @@
+// ---------------------------------------------------------------------------
+// Shared house rules.  Product decks `extends` this file and only add what is
+// specific to them.  Objects merge deeply; lists replace outright - so a child
+// that defines its own "naming.rules" replaces this list, it does not append.
+// ---------------------------------------------------------------------------
+{
+  "deck": {
+    "temp": [25],
+    "options": ["post", "accurate"],
+    "width": 88
+  },
+
+  "naming": {
+    "case": "lower",
+    "bus_style": "angle",
+    "default": "same_name",
+    "rules": [
+      // anything test/scan/debug related is tied off, never left dangling
+      { "match": "^(TM|TEST|DFT)_", "action": "terminate", "type": "tie", "to": "vss" },
+      { "match": "^SCAN_",          "action": "terminate", "type": "tie", "to": "vss" },
+      { "match": "^MRW_",           "action": "terminate", "type": "tie", "to": "vss" },
+      { "match": "^SPARE",          "action": "terminate", "type": "open" }
+    ]
+  },
+
+  "termination": {
+    "auto_terminate_floating": true,
+    "net_prefix": "n_",
+    "default": { "type": "rload", "to": "vss", "value": "1T" },
+    "overrides": [
+      // an unloaded digital output gets a small cap, not a 1T resistor
+      { "match": "^(RX_DATA|DOUT|QOUT)", "type": "cload", "to": "vss", "value": "5f" }
+    ]
+  }
+}

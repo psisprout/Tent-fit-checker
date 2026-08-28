@@ -1,0 +1,6 @@
+# generated decks / reports
+examples/out/
+*.sp
+*.sp.report.txt
+__pycache__/
+*.pyc
