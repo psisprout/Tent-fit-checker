@@ -228,6 +228,25 @@ class TestExamplesEndToEnd(unittest.TestCase):
         names = [s["name"] for s in subs]
         self.assertIn("hbm_tx_drv", names)
 
+    def test_lint_output_file_holds_the_full_report(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            deck_path = os.path.join(tmp, "d.sp")
+            with open(deck_path, "w") as fh:
+                fh.write("Rs a b 0\nR1 a x 1k\nR2 b y 1k\nR3 x y 1k\n")
+            out = os.path.join(tmp, "reports", "lint.txt")
+            res = self.run_cli("lint", deck_path, "--summary", "-o", out)
+            self.assertIn(res.returncode, (0, 1), res.stderr)
+            self.assertTrue(os.path.isfile(out))
+            with open(out) as fh:
+                saved = fh.read()
+            # --summary trimmed the screen, the file keeps everything
+            self.assertIn("merged-net", saved)
+            self.assertNotIn("merged-net", res.stdout.split("by kind:")[-1]
+                             .split("\n\n")[0])
+        finally:
+            shutil.rmtree(tmp)
+
     def test_init_scaffold_then_gen(self):
         tmp = tempfile.mkdtemp()
         try:

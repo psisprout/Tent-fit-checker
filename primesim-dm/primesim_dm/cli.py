@@ -231,9 +231,20 @@ def cmd_lint(args):
                                 force_connectivity=args.force_connectivity)
     findings = checker.run()
     counts = checker.counts()
-    sys.stdout.write(check_mod.render(
+    report = check_mod.render(
         dk, findings, counts, verbose=args.verbose,
-        limit=0 if args.all else args.limit, summary_only=args.summary))
+        limit=0 if args.all else args.limit, summary_only=args.summary)
+    sys.stdout.write(report)
+    if args.output:
+        # the full report, whatever the screen was trimmed to: a saved check
+        # is there to be diffed against the next run
+        full = check_mod.render(dk, findings, counts, verbose=True, limit=0)
+        parent = os.path.dirname(os.path.abspath(args.output))
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent)
+        with open(args.output, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(full)
+        print("wrote %s" % args.output)
     if counts[check_mod.SEV_ERROR]:
         return 1
     if args.strict and counts[check_mod.SEV_WARN]:
@@ -313,6 +324,9 @@ def build_parser():
                    help="max findings to list per kind (default 10)")
     s.add_argument("--all", action="store_true",
                    help="list every finding, no per-kind cap")
+    s.add_argument("-o", "--output", metavar="FILE",
+                   help="also save the full report (every finding, info "
+                        "notes included) to a file")
     s.add_argument("--strict", action="store_true",
                    help="exit non-zero on warnings too")
     s.set_defaults(func=cmd_lint)

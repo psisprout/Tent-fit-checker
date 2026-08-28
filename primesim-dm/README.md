@@ -18,7 +18,7 @@ PrimeSim 시뮬레이션 덱을 자동으로 셋업해주는 CLI.
 
 ```bash
 cd primesim-dm
-python3 -m unittest discover -s tests     # 127개 테스트, 전부 통과해야 정상
+python3 -m unittest discover -s tests     # 128개 테스트, 전부 통과해야 정상
 python3 -m primesim_dm gen examples/hbm_tx_rx.jsonc
 ```
 
@@ -102,6 +102,14 @@ python3 -m primesim_dm check my_deck.jsonc
 
 # 패키지 폴더 안에서라면
 python3 -m primesim_dm lint /proj/sim/lpddr_write.sp
+```
+
+결과는 화면에 출력됩니다. 파일로 남기려면 `-o` 를 쓰세요 — **화면이 `--summary` 나
+`--limit` 으로 잘렸어도 파일에는 전체가 들어갑니다** (info 노트 포함). 다음 번 결과와
+diff 떠서 뭐가 늘고 줄었는지 보는 용도입니다.
+
+```bash
+primesim-dm lint deck.sp --summary -o reports/lint_$(date +%Y%m%d).txt
 ```
 
 `.include` 상대경로는 이 순서로 찾습니다:
